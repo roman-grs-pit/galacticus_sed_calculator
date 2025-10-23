@@ -1,6 +1,5 @@
 import numpy as np
 import h5py 
-import dust_model.galacticus as galacticus
 import astropy.units as u
 from astropy.cosmology import Planck15 
 import re
