@@ -131,6 +131,8 @@ class sed_calculator:
         self.load_sed_template()
         self.config = config
         self.cosmo = cosmology
+        # Cache for validated files to avoid repeated validation
+        self._validated_files = set()
 
     def load_sed_template(self):
         # Load the SED template from the given filename
@@ -139,6 +141,147 @@ class sed_calculator:
             self.sedAges = f['ages'][:]
             self.sedMetallicity = f['metallicity'][:]
             self.sedWavelength = f['wavelength'][:]
+    
+    def get_sed_template_parameters(self):
+        """
+        Extract the star formation history parameters from the SED template.
+        
+        The SED template stores bin maximum values in sedAges and sedMetallicity.
+        This function reconstructs the parameters that would have been used to 
+        generate these bins according to the Galacticus starFormationHistoryFixedAges
+        class specification.
+        
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - ageMinimum: minimum age bin boundary (Gyr)
+            - ageMaximum: maximum age bin boundary (Gyr), typically age of universe
+            - countAges: number of age bins (excluding the zero-age bin)
+            - metallicityMinimum: minimum metallicity bin boundary (Solar units)
+            - metallicityMaximum: maximum metallicity bin boundary (Solar units)
+            - countMetallicities: number of metallicity bins (excluding the infinity bin)
+        """
+        # Ages are stored in descending order (lookback time)
+        # The last non-zero age is the minimum
+        # The first age is the maximum (age of universe)
+        # There's always an additional bin at age=0
+        
+        # Find the index of the zero-age bin
+        zero_age_idx = np.where(self.sedAges == 0)[0]
+        if len(zero_age_idx) > 0:
+            # Exclude the zero-age bin from the count
+            non_zero_ages = self.sedAges[:zero_age_idx[0]]
+            countAges = len(non_zero_ages)
+            ageMaximum = non_zero_ages[0]
+            ageMinimum = non_zero_ages[-1]
+        else:
+            # No explicit zero bin, but there should be
+            countAges = len(self.sedAges) - 1
+            ageMaximum = self.sedAges[0]
+            ageMinimum = self.sedAges[-1]
+        
+        # Metallicity: bins are logarithmically spaced
+        # The first bin starts at the first value (which represents the max of the first bin)
+        # Since bins are [0, sedMetallicity[0]], [sedMetallicity[0], sedMetallicity[1]], ...
+        # The minimum is the first value (metallicityMinimum parameter in Galacticus)
+        # The last finite value before infinity is metallicityMaximum
+        # There's always an additional bin extending to infinity
+        
+        # Find values that are essentially infinity (> 1e100 is a reasonable threshold)
+        infinity_threshold = 1e100
+        finite_mask = self.sedMetallicity < infinity_threshold
+        finite_metallicities = self.sedMetallicity[finite_mask]
+        
+        if len(finite_metallicities) < len(self.sedMetallicity):
+            # There's an infinity bin
+            countMetallicities = len(finite_metallicities)
+            metallicityMinimum = finite_metallicities[0]
+            metallicityMaximum = finite_metallicities[-1]
+        else:
+            # No infinity bin, which would be unusual
+            countMetallicities = len(self.sedMetallicity) - 1
+            metallicityMinimum = self.sedMetallicity[0]
+            metallicityMaximum = self.sedMetallicity[-1]
+        
+        return {
+            'ageMinimum': ageMinimum,
+            'ageMaximum': ageMaximum,
+            'countAges': countAges,
+            'metallicityMinimum': metallicityMinimum,
+            'metallicityMaximum': metallicityMaximum,
+            'countMetallicities': countMetallicities
+        }
+    
+    def validate_sfh_compatibility(self, filename):
+        """
+        Validate that the star formation history parameters in the Galacticus file
+        are compatible with the SED template.
+        
+        Parameters
+        ----------
+        filename : str
+            Path to the Galacticus HDF5 file
+            
+        Raises
+        ------
+        ValueError
+            If the SFH parameters don't match the SED template parameters
+            
+        Notes
+        -----
+        Results are cached, so repeated calls with the same filename will not
+        re-validate the file.
+        """
+        # Check if we've already validated this file
+        if filename in self._validated_files:
+            return
+        
+        # Get parameters from SED template
+        sed_params = self.get_sed_template_parameters()
+        
+        # Read parameters from Galacticus file
+        with h5py.File(filename, 'r') as f:
+            if '/Parameters/starFormationHistory' not in f:
+                raise ValueError("No starFormationHistory parameters found in Galacticus file")
+            
+            sfh_group = f['/Parameters/starFormationHistory']
+            sfh_params = {
+                'ageMinimum': sfh_group.attrs['ageMinimum'],
+                'countAges': sfh_group.attrs['countAges'],
+                'metallicityMinimum': sfh_group.attrs['metallicityMinimum'],
+                'metallicityMaximum': sfh_group.attrs['metallicityMaximum'],
+                'countMetallicities': sfh_group.attrs['countMetallicities']
+            }
+        
+        # Compare parameters
+        errors = []
+        
+        # Check counts
+        if sfh_params['countAges'] != sed_params['countAges']:
+            errors.append(f"countAges mismatch: SFH={sfh_params['countAges']}, SED template={sed_params['countAges']}")
+        
+        if sfh_params['countMetallicities'] != sed_params['countMetallicities']:
+            errors.append(f"countMetallicities mismatch: SFH={sfh_params['countMetallicities']}, SED template={sed_params['countMetallicities']}")
+        
+        # Check boundaries with some tolerance for floating point comparison
+        rel_tol = 1e-6
+        
+        if not np.isclose(sfh_params['ageMinimum'], sed_params['ageMinimum'], rtol=rel_tol):
+            errors.append(f"ageMinimum mismatch: SFH={sfh_params['ageMinimum']}, SED template={sed_params['ageMinimum']}")
+        
+        if not np.isclose(sfh_params['metallicityMinimum'], sed_params['metallicityMinimum'], rtol=rel_tol):
+            errors.append(f"metallicityMinimum mismatch: SFH={sfh_params['metallicityMinimum']}, SED template={sed_params['metallicityMinimum']}")
+        
+        if not np.isclose(sfh_params['metallicityMaximum'], sed_params['metallicityMaximum'], rtol=rel_tol):
+            errors.append(f"metallicityMaximum mismatch: SFH={sfh_params['metallicityMaximum']}, SED template={sed_params['metallicityMaximum']}")
+        
+        if errors:
+            error_msg = "SED template and star formation history are incompatible:\n  " + "\n  ".join(errors)
+            raise ValueError(error_msg)
+        
+        # Cache this file as validated
+        self._validated_files.add(filename)
 
     def calculate_rest_frame_sed(self, starFormationHistory):
         return calculate_sed_from_sfh_and_template(self.sedTemplate, starFormationHistory)
@@ -227,16 +370,27 @@ class sed_calculator:
             - `component_spectrum.waveset` returns a wavelength array with astropy units.
             - `component_spectrum(wav, flux_unit='FNU')` returns the Fnu flux at the wavelengths `wav`, also with astropy units.
 
+        Raises
+        ------
+        ValueError
+            If the star formation history parameters in the Galacticus file are incompatible
+            with the SED template.
+
         Notes
         -----
         - For 'disk' and 'spheroid' components, the continuum is calculated based on the star formation history (SFH) and `self.sedTemplate`.
         - For the 'AGN' component, the continuum is set to zero, and only emission lines are included (if `include_emission_lines` is True).
         - Emission lines are modeled as Gaussian profiles with the specified `lineFWHM`.
         - The method relies on the synphot library for spectrum calculations and assumes the Galacticus data is structured correctly.
+        - This method validates that the SFH binning in the Galacticus file matches the SED template binning.
         """
         valid_components = ['disk', 'spheroid', 'AGN']
         if component not in valid_components:
             raise ValueError(f"Invalid component '{component}'. Must be one of {valid_components}.")
+        
+        # Validate SFH compatibility before processing
+        self.validate_sfh_compatibility(filename)
+        
         galData = self.read_galacticus_galaxy(filename, galIndex)
         redshift = galData['redshift']
         if component in ['disk', 'spheroid']:
