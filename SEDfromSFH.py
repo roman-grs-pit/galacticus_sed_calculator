@@ -168,7 +168,7 @@ class sed_calculator:
         # There's always an additional bin at age=0
         
         # Find the index of the zero-age bin
-        zero_age_idx = np.where(self.sedAges == 0)[0]
+        zero_age_idx = np.where(self.sedAges < 1e-10)[0]
         if len(zero_age_idx) > 0:
             # Exclude the zero-age bin from the count
             non_zero_ages = self.sedAges[:zero_age_idx[0]]
@@ -188,8 +188,8 @@ class sed_calculator:
         # The last finite value before infinity is metallicityMaximum
         # There's always an additional bin extending to infinity
         
-        # Find values that are essentially infinity (> 1e100 is a reasonable threshold)
-        infinity_threshold = 1e100
+        # Find values that are essentially infinity (> 1e10 is a reasonable threshold)
+        infinity_threshold = 1e10
         finite_mask = self.sedMetallicity < infinity_threshold
         finite_metallicities = self.sedMetallicity[finite_mask]
         
