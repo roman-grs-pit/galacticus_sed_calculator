@@ -427,3 +427,118 @@ class sed_calculator:
             else:
                 total_spectrum += spectrum
         return total_spectrum
+    
+    def calculate_magnitudes(self, filename, galIndex, bandpasses, component='total', 
+                            magnitude_system='AB', obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA,
+                            includeAGN=True, lineFWHM=10*u.AA):
+        """
+        Calculate observed magnitudes for a galaxy in multiple bandpasses.
+        
+        This method calculates magnitudes by generating a galaxy spectrum and passing it
+        through the specified bandpass filters. For catalog-scale processing, bandpass
+        objects should be loaded once and reused across galaxies for efficiency.
+        
+        Parameters
+        ----------
+        filename : str
+            Path to Galacticus HDF5 file
+        galIndex : int
+            Galaxy index in the catalog
+        bandpasses : dict
+            Dictionary mapping filter names to synphot SpectralElement objects.
+            Example: {'F158': bandpass_f158, 'F184': bandpass_f184}
+        component : str, optional
+            Component to calculate magnitudes for. Must be one of:
+            - 'disk': disk component only
+            - 'spheroid': spheroid component only  
+            - 'total': combined disk + spheroid (and optionally AGN)
+            Default is 'total'.
+        magnitude_system : str, optional
+            Magnitude system to use. Must be one of:
+            - 'AB': AB magnitude system (default)
+            - 'ST': ST magnitude system
+            - 'Vega': Vega magnitude system
+            Default is 'AB'.
+        obs_wavelengths : array-like or Quantity, optional
+            Wavelengths at which to evaluate the spectrum. Default is 
+            np.linspace(8000, 30000, 1000)*u.AA
+        includeAGN : bool, optional
+            Whether to include AGN component when component='total'. 
+            Default is True.
+        lineFWHM : Quantity, optional
+            Full width at half maximum of emission lines.
+            Default is 10 Angstroms.
+        
+        Returns
+        -------
+        magnitudes : dict
+            Dictionary mapping filter names to magnitude values (float).
+            Returns NaN for filters where the calculation fails.
+        
+        Examples
+        --------
+        >>> # Load bandpasses once for reuse
+        >>> import stpsf
+        >>> roman = stpsf.WFI()
+        >>> bandpasses = {
+        ...     'F158': roman._get_synphot_bandpass('F158'),
+        ...     'F184': roman._get_synphot_bandpass('F184')
+        ... }
+        >>> 
+        >>> # Calculate magnitudes for a galaxy
+        >>> calc = sed_calculator('sed_template.hdf5')
+        >>> mags = calc.calculate_magnitudes('catalog.hdf5', galIndex=0, 
+        ...                                    bandpasses=bandpasses)
+        >>> print(mags)
+        {'F158': 23.45, 'F184': 23.12}
+        
+        Notes
+        -----
+        For best performance when processing large catalogs:
+        1. Load bandpass objects once before the loop
+        2. Reuse the same sed_calculator instance for all galaxies
+        3. Use the same obs_wavelengths for all galaxies
+        """
+        from synphot import Observation
+        
+        # Get the spectrum for the specified component
+        if component == 'total':
+            spectrum = self.evaluate_total_spectrum(filename, galIndex, 
+                                                    includeAGN=includeAGN,
+                                                    obs_wavelengths=obs_wavelengths,
+                                                    lineFWHM=lineFWHM)
+        elif component in ['disk', 'spheroid', 'AGN']:
+            spectrum = self.evaluate_component_spectrum(filename, galIndex,
+                                                        component=component,
+                                                        obs_wavelengths=obs_wavelengths,
+                                                        lineFWHM=lineFWHM)
+        else:
+            raise ValueError(f"Invalid component '{component}'. Must be 'disk', 'spheroid', 'AGN', or 'total'.")
+        
+        # Calculate magnitudes in each bandpass
+        magnitudes = {}
+        for filter_name, bandpass in bandpasses.items():
+            try:
+                # Create observation by passing spectrum through bandpass
+                obs = Observation(spectrum, bandpass, force='taper')
+                
+                # Calculate magnitude in the specified system
+                if magnitude_system == 'AB':
+                    mag = obs.effstim(flux_unit=u.ABmag)
+                elif magnitude_system == 'ST':
+                    mag = obs.effstim(flux_unit=u.STmag)
+                elif magnitude_system == 'Vega':
+                    # Vega magnitudes require a Vega spectrum
+                    vega = SourceSpectrum.from_vega()
+                    mag = obs.effstim(flux_unit='vegamag', vegaspec=vega)
+                else:
+                    raise ValueError(f"Invalid magnitude_system '{magnitude_system}'. Must be 'AB', 'ST', or 'Vega'.")
+                
+                magnitudes[filter_name] = mag.value
+                
+            except Exception as e:
+                # If magnitude calculation fails for a filter, store NaN
+                print(f"Warning: Failed to calculate {filter_name} magnitude for galaxy {galIndex}: {e}")
+                magnitudes[filter_name] = np.nan
+        
+        return magnitudes
