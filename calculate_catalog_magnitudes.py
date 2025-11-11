@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 """
-Example script showing how to calculate magnitudes for all galaxies in a Galacticus catalog.
+Calculate observed magnitudes for galaxies in a Galacticus catalog.
 
-This script demonstrates:
-1. Loading Roman WFI bandpasses once (for efficiency)
-2. Calculating magnitudes for all galaxies in a catalog
-3. Saving results to the Galacticus file or a separate output file
+This script calculates Roman WFI magnitudes for all galaxies in a Galacticus catalog
+using the SED calculator and synphot. Magnitudes can be saved directly to the 
+Galacticus file or to a separate output file.
 """
 
 import numpy as np
@@ -17,17 +16,15 @@ from SEDfromSFH import sed_calculator
 import time
 import shutil
 import os
+import argparse
+import sys
 
-# Configuration
-SED_TEMPLATE_FILE = "data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5"
-GALACTICUS_CATALOG = "data/romanUNIT.hdf5"
-OUTPUT_FILE = "galaxy_magnitudes.hdf5"
-
-# Roman WFI filters to calculate
-ROMAN_FILTERS = ["F062", "F087", "F106", "F129", "F158", "F184", "F213"]
-
-# Wavelength grid for spectrum calculation
-OBS_WAVELENGTHS = np.linspace(4000, 23000, 2000) * u.AA
+# Default configuration
+DEFAULT_SED_TEMPLATE = "data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5"
+DEFAULT_FILTERS = ["F062", "F087", "F106", "F129", "F158", "F184", "F213"]
+DEFAULT_WAVELENGTH_MIN = 4000  # Angstroms
+DEFAULT_WAVELENGTH_MAX = 23000  # Angstroms
+DEFAULT_WAVELENGTH_NPOINTS = 2000
 
 
 def load_roman_bandpasses(filter_names):
@@ -69,7 +66,7 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                                  bandpasses, output_file=None,
                                  max_galaxies=None, component='total',
                                  save_to_input=False, copy_input=True,
-                                 check_existing=True):
+                                 check_existing=True, obs_wavelengths=None):
     """
     Calculate magnitudes for all galaxies in a Galacticus catalog.
     
@@ -99,6 +96,9 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     check_existing : bool, optional
         If True, check if magnitudes already exist and skip calculation if they do.
         Default is True.
+    obs_wavelengths : Quantity, optional
+        Wavelength grid for spectrum calculation. If None, uses default
+        np.linspace(4000, 23000, 2000) * u.AA
     
     Returns
     -------
@@ -160,6 +160,10 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     unit_cosmo = FlatLambdaCDM(H0=67.74, Om0=0.3089)
     calc = sed_calculator(sed_template_file, cosmology=unit_cosmo)
     
+    # Set wavelength grid
+    if obs_wavelengths is None:
+        obs_wavelengths = np.linspace(4000, 23000, 2000) * u.AA
+    
     # Get number of galaxies in catalog
     n_galaxies_total = get_galaxy_count(working_file)
     print(f"Found {n_galaxies_total} galaxies in catalog")
@@ -203,7 +207,7 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                 galIndex=i,
                 bandpasses=bandpasses,
                 component=component,
-                obs_wavelengths=OBS_WAVELENGTHS
+                obs_wavelengths=obs_wavelengths
             )
             
             # Store results in array
@@ -312,7 +316,6 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
             # Add attributes
             dataset.attrs['comment'] = comment.encode('utf-8')
             dataset.attrs['filter'] = filter_name.encode('utf-8')
-            dataset.attrs['unitsInSI'] = 1.0  # Magnitudes are dimensionless
     
     print(f"Saved {len(filter_names)} magnitude datasets to {galacticus_file}")
 
@@ -348,48 +351,121 @@ def save_magnitude_catalog(results, output_file):
     print(f"Saved magnitude catalog with shape {results['magnitudes'].shape}")
 
 
+def parse_arguments():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description='Calculate observed magnitudes for galaxies in a Galacticus catalog.',
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter
+    )
+    
+    # Required arguments
+    parser.add_argument('catalog', 
+                       help='Path to Galacticus HDF5 catalog file')
+    parser.add_argument('sed_template',
+                       help='Path to SED template HDF5 file')
+    
+    # Optional arguments
+    parser.add_argument('-f', '--filters', nargs='+', default=DEFAULT_FILTERS,
+                       help='Roman WFI filters to calculate (e.g., F062 F087 F158)')
+    parser.add_argument('-n', '--max-galaxies', type=int, default=None,
+                       help='Maximum number of galaxies to process (default: all)')
+    parser.add_argument('-c', '--component', default='total',
+                       choices=['total', 'disk', 'spheroid', 'AGN'],
+                       help='Galaxy component to use for magnitude calculation')
+    
+    # Save options
+    save_group = parser.add_mutually_exclusive_group()
+    save_group.add_argument('--save-to-input', action='store_true', default=True,
+                           help='Save magnitudes to the input Galacticus file (default)')
+    save_group.add_argument('--save-to-file', metavar='OUTPUT',
+                           help='Save magnitudes to a separate HDF5 file instead')
+    
+    parser.add_argument('--no-copy', action='store_true',
+                       help='Modify input file directly instead of creating a copy (use with caution!)')
+    parser.add_argument('--no-check-existing', action='store_true',
+                       help='Skip check for existing magnitudes and overwrite without prompting')
+    
+    # Wavelength options
+    parser.add_argument('--wavelength-min', type=float, default=DEFAULT_WAVELENGTH_MIN,
+                       help='Minimum wavelength for spectrum calculation (Angstroms)')
+    parser.add_argument('--wavelength-max', type=float, default=DEFAULT_WAVELENGTH_MAX,
+                       help='Maximum wavelength for spectrum calculation (Angstroms)')
+    parser.add_argument('--wavelength-npoints', type=int, default=DEFAULT_WAVELENGTH_NPOINTS,
+                       help='Number of wavelength points for spectrum calculation')
+    
+    # System options
+    parser.add_argument('--magnitude-system', default='AB',
+                       choices=['AB', 'ST', 'Vega'],
+                       help='Magnitude system to use')
+    
+    return parser.parse_args()
+
+
 def main():
     """Main execution function."""
+    # Parse command-line arguments
+    args = parse_arguments()
+    
     print("="*60)
     print("CALCULATE MAGNITUDES FOR GALACTICUS CATALOG")
     print("="*60)
+    print(f"\nInput catalog: {args.catalog}")
+    print(f"SED template: {args.sed_template}")
+    print(f"Filters: {', '.join(args.filters)}")
+    print(f"Component: {args.component}")
+    print(f"Magnitude system: {args.magnitude_system}")
     
-    # Step 1: Load bandpass filters (do this once!)
-    bandpasses = load_roman_bandpasses(ROMAN_FILTERS)
+    if args.max_galaxies:
+        print(f"Max galaxies: {args.max_galaxies}")
+    else:
+        print("Processing all galaxies")
     
-    # Step 2: Calculate magnitudes for all galaxies
-    # 
-    # OPTION A: Save to the Galacticus file (recommended)
-    # This saves magnitudes as:
-    # /Lightcone/Output1/nodeData/apparentMagnitudeRomanWFI:<filter>
-    # with appropriate attributes (comment, filter)
-    #
-    # If copy_input=True (default), creates a new file with '_with_magnitudes' suffix
-    # If copy_input=False, modifies the original file directly
-    #
+    # Check if files exist
+    if not os.path.exists(args.catalog):
+        print(f"\nError: Catalog file not found: {args.catalog}")
+        sys.exit(1)
+    if not os.path.exists(args.sed_template):
+        print(f"\nError: SED template file not found: {args.sed_template}")
+        sys.exit(1)
+    
+    # Create wavelength grid
+    obs_wavelengths = np.linspace(args.wavelength_min, args.wavelength_max, 
+                                   args.wavelength_npoints) * u.AA
+    
+    # Load bandpass filters
+    print("\nLoading bandpass filters...")
+    bandpasses = load_roman_bandpasses(args.filters)
+    
+    # Determine save mode
+    if args.save_to_file:
+        save_to_input = False
+        output_file = args.save_to_file
+        copy_input = False
+        print(f"\nSaving to separate file: {output_file}")
+    else:
+        save_to_input = True
+        output_file = None
+        copy_input = not args.no_copy
+        if copy_input:
+            print("\nSaving to input file (will create a copy with '_with_magnitudes' suffix)")
+        else:
+            print("\nWARNING: Saving to input file directly (no copy will be made)")
+    
+    check_existing = not args.no_check_existing
+    
+    # Calculate magnitudes
     results = calculate_catalog_magnitudes(
-        sed_template_file=SED_TEMPLATE_FILE,
-        galacticus_catalog=GALACTICUS_CATALOG,
+        sed_template_file=args.sed_template,
+        galacticus_catalog=args.catalog,
         bandpasses=bandpasses,
-        max_galaxies=10,  # Set to None to process all galaxies
-        component='total',
-        save_to_input=True,  # Save to Galacticus file
-        copy_input=True,     # Make a copy first (safer)
-        check_existing=True  # Check if magnitudes already exist
+        output_file=output_file,
+        max_galaxies=args.max_galaxies,
+        component=args.component,
+        save_to_input=save_to_input,
+        copy_input=copy_input,
+        check_existing=check_existing,
+        obs_wavelengths=obs_wavelengths
     )
-    
-    # OPTION B: Save to a separate output file (old behavior)
-    # Uncomment these lines and comment out the above to use this option
-    #
-    # results = calculate_catalog_magnitudes(
-    #     sed_template_file=SED_TEMPLATE_FILE,
-    #     galacticus_catalog=GALACTICUS_CATALOG,
-    #     bandpasses=bandpasses,
-    #     output_file=OUTPUT_FILE,
-    #     max_galaxies=10,  # Set to None to process all galaxies
-    #     component='total',
-    #     save_to_input=False
-    # )
     
     if results is not None:
         print("\n" + "="*60)
