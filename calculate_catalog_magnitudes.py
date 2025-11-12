@@ -280,11 +280,11 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
     
     # Determine comment based on component
     if component == 'total':
-        comment = "Total AB magnitude (disk + spheroid + emission lines)"
+        comment = "Total AB magnitude (disk + spheroid + AGN) including emission lines. Note there is currently no AGN continuum."
     elif component == 'disk':
-        comment = "Disk AB magnitude (disk + emission lines)"
+        comment = "Disk AB magnitude including emission lines"
     elif component == 'spheroid':
-        comment = "Spheroid AB magnitude (spheroid + emission lines)"
+        comment = "Spheroid AB magnitude including emission lines"
     elif component == 'AGN':
         comment = "AGN AB magnitude (emission lines only)"
     else:
