@@ -308,9 +308,7 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
             print(f"  Creating dataset: {dataset_path}")
             dataset = f.create_dataset(
                 dataset_path,
-                data=magnitude_array[:, j],
-                compression='gzip',
-                compression_opts=9
+                data=magnitude_array[:, j]
             )
             
             # Add attributes
