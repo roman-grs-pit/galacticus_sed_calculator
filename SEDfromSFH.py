@@ -368,13 +368,22 @@ class sed_calculator:
                 raise ValueError("No starFormationHistory parameters found in Galacticus file")
             
             sfh_group = f['/Parameters/starFormationHistory']
-            sfh_params = {
-                'ageMinimum': sfh_group.attrs['ageMinimum'],
-                'countAges': sfh_group.attrs['countAges'],
-                'metallicityMinimum': sfh_group.attrs['metallicityMinimum'],
-                'metallicityMaximum': sfh_group.attrs['metallicityMaximum'],
-                'countMetallicities': sfh_group.attrs['countMetallicities']
-            }
+            try:
+                sfh_params = {
+                    'ageMinimum': sfh_group.attrs['ageMinimum'],
+                    'countAges': sfh_group.attrs['countAges'],
+                    'metallicityMinimum': sfh_group.attrs['metallicityMinimum'],
+                    'metallicityMaximum': sfh_group.attrs['metallicityMaximum'],
+                    'countMetallicities': sfh_group.attrs['countMetallicities']
+                }
+            except KeyError:
+                sfh_params = {
+                    'ageMinimum': sfh_group.attrs['timeStepMinimum'],
+                    'countAges': sfh_group.attrs['countTimeStepsMaximum'],
+                    'metallicityMinimum': sfh_group.attrs['metallicityMinimum'],
+                    'metallicityMaximum': sfh_group.attrs['metallicityMaximum'],
+                    'countMetallicities': sfh_group.attrs['countMetallicities']
+                } 
         
         # Compare parameters
         errors = []
