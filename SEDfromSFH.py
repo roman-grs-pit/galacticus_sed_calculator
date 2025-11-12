@@ -59,6 +59,83 @@ def process_wavelength_array(wavelengths):
         wavelengths = wavelengths * u.AA
     return wavelengths.to(u.AA)
 
+def detect_galacticus_format(filename):
+    """
+    Auto-detect whether a Galacticus file uses lightcone or fixed-time output format.
+    
+    Parameters
+    ----------
+    filename : str
+        Path to the Galacticus HDF5 file
+        
+    Returns
+    -------
+    format_type : str
+        Either 'lightcone' or 'fixed-time'
+    base_path : str
+        Base path to nodeData (e.g., '/Lightcone/Output1' or '/Outputs/Output1')
+    """
+    with h5py.File(filename, 'r') as f:
+        if 'Lightcone' in f:
+            return 'lightcone', '/Lightcone/Output1'
+        elif 'Outputs' in f:
+            # Find first output (usually Output1, but could be Output2, etc.)
+            outputs = [key for key in f['/Outputs'].keys() if key.startswith('Output')]
+            if outputs:
+                # Sort to get the first output numerically
+                outputs.sort(key=lambda x: int(x.replace('Output', '')))
+                return 'fixed-time', f'/Outputs/{outputs[0]}'
+            else:
+                raise ValueError("Found /Outputs group but no Output* subgroups")
+        else:
+            raise ValueError("Cannot determine format: neither /Lightcone nor /Outputs found in file")
+
+def outputTime_to_redshift(outputTime, cosmo=Planck15):
+    """
+    Convert age of universe (outputTime) to redshift.
+    
+    Parameters
+    ----------
+    outputTime : float
+        Age of universe in Gyr
+    cosmo : astropy.cosmology
+        Cosmology object (default: Planck15)
+        
+    Returns
+    -------
+    redshift : float
+        Redshift corresponding to the output time
+    """
+    from astropy.cosmology import z_at_value
+    return z_at_value(cosmo.age, outputTime * u.Gyr)
+
+def age_of_universe_to_lookback_time(times, outputTime):
+    """
+    Convert age-of-universe times to lookback times (stellar ages).
+    
+    In fixed-time output format, times are stored as age of universe.
+    We need lookback times for SED calculation: lookback_time = outputTime - age_of_universe
+    
+    Parameters
+    ----------
+    times : array-like
+        Ages of universe in Gyr (time bin edges)
+    outputTime : float
+        Age of universe at output time in Gyr
+        
+    Returns
+    -------
+    lookback_times : ndarray
+        Lookback times in Gyr
+    """
+    times = np.asarray(times)
+    lookback_times = outputTime - times
+    # Ensure non-negative (can have small numerical errors)
+    lookback_times = np.maximum(lookback_times, 0.0)
+    return lookback_times
+
+# Default configuration for lightcone format
+# Note: This is now auto-detected and adjusted based on file format
 galacticus_sed_config = {
     'diskSedPath': '/Lightcone/Output1/nodeData/diskStellarSED:identity',
     'spheroidSedPath': '/Lightcone/Output1/nodeData/spheroidStellarSED:identity',
@@ -94,7 +171,7 @@ def getLineNames(f, component='disk', verbose=False):
     lineNames = f[line_group].attrs['lineNames']
     return lineNames
 
-def getLineProperties(fname, component='disk', galIndex=None, hdf5_base_path = '/Lightcone/Output1/nodeData/luminosityEmissionLine'):
+def getLineProperties(fname, component='disk', galIndex=None, hdf5_base_path=None):
     """
     Get the emission line names, wavelengths, and luminosities for a given component from the Galacticus output file.
     
@@ -102,13 +179,19 @@ def getLineProperties(fname, component='disk', galIndex=None, hdf5_base_path = '
     - fname: str, path to the Galacticus output HDF5 file.
     - component: str, 'disk', 'AGN', or 'spheroid' to specify which component's emission lines to retrieve.
     - galIndex: int or None, index of the galaxy to retrieve line luminosities for. If None, retrieves all galaxies.
-    - hdf5_base_path: str, base path for the HDF5 file structure where emission line data is stored.
+    - hdf5_base_path: str or None, base path for the HDF5 file structure where emission line data is stored.
+      If None, will auto-detect based on file format (lightcone vs fixed-time).
     
     Returns:
     - lineNames: np.ndarray of emission line names.
     - lineWavelengths: np.ndarray of wavelengths corresponding to the emission lines.
     - lineLuminosities: np.ndarray of luminosities for the emission lines.
     """
+    # Auto-detect base path if not provided
+    if hdf5_base_path is None:
+        format_type, base_path = detect_galacticus_format(fname)
+        hdf5_base_path = f'{base_path}/nodeData/luminosityEmissionLine'
+    
     with h5py.File(fname, 'r') as f:
         lineNamesBytes = getLineNames(f, component=component)
         # Convert to regular strings
@@ -133,6 +216,45 @@ class sed_calculator:
         self.cosmo = cosmology
         # Cache for validated files to avoid repeated validation
         self._validated_files = set()
+        # Cache for detected file formats
+        self._file_formats = {}
+    
+    def _get_config_for_format(self, format_type, base_path):
+        """
+        Generate config dictionary for a specific format type.
+        
+        Parameters
+        ----------
+        format_type : str
+            'lightcone' or 'fixed-time'
+        base_path : str
+            Base path like '/Lightcone/Output1' or '/Outputs/Output1'
+            
+        Returns
+        -------
+        config : dict
+            Configuration dictionary with format-specific paths
+        """
+        node_data_path = f'{base_path}/nodeData'
+        
+        config = {
+            'format_type': format_type,
+            'base_path': base_path,
+            'diskSedPath': f'{node_data_path}/diskStellarSED:identity',
+            'spheroidSedPath': f'{node_data_path}/spheroidStellarSED:identity',
+            'diskSedWavelengths': f'{node_data_path}/diskStellarSED:identityColumnValues',
+            'spheroidSedWavelengths': f'{node_data_path}/spheroidStellarSED:identityColumnValues',
+            'diskSFH': f'{node_data_path}/diskStarFormationHistoryMass',
+            'spheroidSFH': f'{node_data_path}/spheroidStarFormationHistoryMass',
+        }
+        
+        if format_type == 'lightcone':
+            config['redshift'] = f'{node_data_path}/lightconeRedshiftObserved'
+            config['diskSFH_times'] = f'{node_data_path}/diskStarFormationHistoryTimes'
+            config['spheroidSFH_times'] = f'{node_data_path}/spheroidStarFormationHistoryTimes'
+        # For fixed-time format, redshift and times are handled differently (not in config)
+        
+        return config
 
     def load_sed_template(self):
         # Load the SED template from the given filename
@@ -311,15 +433,96 @@ class sed_calculator:
         return observed_Fnu*u.Lsun/(u.Hz * u.Mpc**2), wavelengths
     
     def read_galacticus_galaxy(self, filename, galIndex):
-        # read a Galacticus catalog file (hdf5) and get properties of one galaxy
+        """
+        Read a Galacticus catalog file (HDF5) and get properties of one galaxy.
+        
+        This method automatically detects the file format (lightcone vs fixed-time)
+        and reads the appropriate data structure.
+        
+        Parameters
+        ----------
+        filename : str
+            Path to Galacticus HDF5 file
+        galIndex : int
+            Index of the galaxy to read
+            
+        Returns
+        -------
+        galData : dict
+            Dictionary containing galaxy properties:
+            - redshift: Galaxy redshift
+            - diskSFH: Star formation history for disk (2D array: metallicity x time)
+            - diskSFH_times: Time bins for disk SFH (lookback times in Gyr)
+            - spheroidSFH: Star formation history for spheroid
+            - spheroidSFH_times: Time bins for spheroid SFH (lookback times in Gyr)
+        """
+        # Detect format if not already cached
+        if filename not in self._file_formats:
+            format_type, base_path = detect_galacticus_format(filename)
+            self._file_formats[filename] = (format_type, base_path)
+        else:
+            format_type, base_path = self._file_formats[filename]
+        
+        # Get format-specific config
+        config = self._get_config_for_format(format_type, base_path)
+        
         with h5py.File(filename, 'r') as f:
-            self.galData = {
-                'redshift': f[self.config['redshift']][galIndex],
-                'diskSFH': np.array([list(x) for x in f[self.config['diskSFH']][galIndex]], dtype=float),
-                'diskSFH_times': f[self.config['diskSFH_times']][galIndex],
-                'spheroidSFH': np.array([list(x) for x in f[self.config['spheroidSFH']][galIndex]], dtype=float),
-                'spheroidSFH_times': f[self.config['spheroidSFH_times']][galIndex],
-            }
+            if format_type == 'lightcone':
+                # Lightcone format: per-galaxy redshift and times
+                self.galData = {
+                    'redshift': f[config['redshift']][galIndex],
+                    'diskSFH': np.array([list(x) for x in f[config['diskSFH']][galIndex]], dtype=float),
+                    'diskSFH_times': f[config['diskSFH_times']][galIndex],
+                    'spheroidSFH': np.array([list(x) for x in f[config['spheroidSFH']][galIndex]], dtype=float),
+                    'spheroidSFH_times': f[config['spheroidSFH_times']][galIndex],
+                }
+            
+            elif format_type == 'fixed-time':
+                # Fixed-time format: single output time, times from attributes
+                output_group = f[base_path]
+                outputTime = output_group.attrs['outputTime']
+                
+                # Convert outputTime to redshift
+                redshift = outputTime_to_redshift(outputTime, self.cosmo)
+                
+                # Read SFH datasets
+                diskSFH_dataset = f[config['diskSFH']]
+                spheroidSFH_dataset = f[config['spheroidSFH']]
+                
+                # Get time and metallicity bins from dataset attributes
+                # Times are age-of-universe bin edges
+                disk_times_age_of_universe = diskSFH_dataset.attrs['time']
+                spheroid_times_age_of_universe = spheroidSFH_dataset.attrs['time']
+                
+                # Convert to lookback times (stellar ages)
+                # Note: SFH bins represent [time[i-1], time[i]), so we take bin centers
+                # Actually, the documentation says times are the maximum time for each bin
+                # So we convert directly
+                disk_times_lookback = age_of_universe_to_lookback_time(
+                    disk_times_age_of_universe, outputTime
+                )
+                spheroid_times_lookback = age_of_universe_to_lookback_time(
+                    spheroid_times_age_of_universe, outputTime
+                )
+                
+                # Read SFH data for this galaxy
+                # Note: Data is stored as [metallicity x time] just like lightcone
+                diskSFH = np.array([list(x) for x in diskSFH_dataset[galIndex]], dtype=float)
+                spheroidSFH = np.array([list(x) for x in spheroidSFH_dataset[galIndex]], dtype=float)
+                
+                self.galData = {
+                    'redshift': redshift,
+                    'diskSFH': diskSFH,
+                    'diskSFH_times': disk_times_lookback,
+                    'spheroidSFH': spheroidSFH,
+                    'spheroidSFH_times': spheroid_times_lookback,
+                    'format_type': format_type,
+                    'outputTime': outputTime,
+                }
+            
+            else:
+                raise ValueError(f"Unknown format type: {format_type}")
+        
         return self.galData
 
     def calculate_sed_for_galacticus_galaxy(self, filename, galIndex, wavelengths):
