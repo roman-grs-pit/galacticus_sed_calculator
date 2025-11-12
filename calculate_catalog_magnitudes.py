@@ -12,7 +12,7 @@ import h5py
 import astropy.units as u
 from astropy.cosmology import FlatLambdaCDM
 import stpsf
-from SEDfromSFH import sed_calculator
+from SEDfromSFH import sed_calculator, detect_galacticus_format
 import time
 import shutil
 import os
@@ -56,9 +56,21 @@ def load_roman_bandpasses(filter_names):
 
 def get_galaxy_count(filename):
     """Get the number of galaxies in the catalog."""
+    # Detect format and get appropriate path
+    format_type, base_path = detect_galacticus_format(filename)
+    
     with h5py.File(filename, 'r') as f:
-        # Get the length of the redshift array (or any other galaxy property)
-        n_galaxies = len(f['/Lightcone/Output1/nodeData/lightconeRedshiftObserved'][:])
+        # Get the length of an array in nodeData
+        node_data_path = f'{base_path}/nodeData'
+        
+        if format_type == 'lightcone':
+            # Use lightcone-specific redshift array
+            n_galaxies = len(f[f'{node_data_path}/lightconeRedshiftObserved'][:])
+        else:
+            # For fixed-time, we can use any dataset in nodeData
+            # Let's use diskStarFormationHistoryMass
+            n_galaxies = len(f[f'{node_data_path}/diskStarFormationHistoryMass'][:])
+    
     return n_galaxies
 
 
@@ -70,12 +82,15 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     """
     Calculate magnitudes for all galaxies in a Galacticus catalog.
     
+    Automatically detects whether the catalog is in lightcone or fixed-time format
+    and handles paths accordingly.
+    
     Parameters
     ----------
     sed_template_file : str
         Path to SED template HDF5 file
     galacticus_catalog : str
-        Path to Galacticus catalog HDF5 file
+        Path to Galacticus catalog HDF5 file (lightcone or fixed-time format)
     bandpasses : dict
         Dictionary of bandpass filters (from load_roman_bandpasses)
     output_file : str, optional
@@ -87,8 +102,9 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     component : str, optional
         Galaxy component to use ('total', 'disk', 'spheroid'). Default is 'total'.
     save_to_input : bool, optional
-        If True, save magnitudes to the Galacticus catalog file in the format:
-        /Lightcone/Output1/nodeData/apparentMagnitudeRomanWFI:<filter>
+        If True, save magnitudes to the Galacticus catalog file.
+        For lightcone: /Lightcone/Output1/nodeData/apparentMagnitudeRomanWFI:<filter>
+        For fixed-time: /Outputs/Output1/nodeData/apparentMagnitudeRomanWFI:<filter>
         If False, save to a separate output file. Default is False.
     copy_input : bool, optional
         If True and save_to_input=True, copy the input file before modifying.
@@ -109,7 +125,14 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         - 'redshifts': array of galaxy redshifts
         - 'galaxy_indices': array of galaxy indices processed
         - 'output_file': path to file where magnitudes were saved (if applicable)
+        - 'format_type': detected format ('lightcone' or 'fixed-time')
+        - 'base_path': base path used in the HDF5 file
     """
+    # Detect the format of the catalog
+    format_type, base_path = detect_galacticus_format(galacticus_catalog)
+    print(f"\nDetected format: {format_type}")
+    print(f"Base path: {base_path}")
+    
     # Determine the file to work with
     working_file = galacticus_catalog
     
@@ -141,9 +164,10 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     if check_existing and save_to_input:
         print("\nChecking for existing magnitude datasets...")
         existing_filters = []
+        node_data_path = f'{base_path}/nodeData'
         with h5py.File(working_file, 'r') as f:
             for filter_name in filter_names:
-                dataset_path = f'/Lightcone/Output1/nodeData/apparentMagnitudeRomanWFI:{filter_name}'
+                dataset_path = f'{node_data_path}/apparentMagnitudeRomanWFI:{filter_name}'
                 if dataset_path in f:
                     existing_filters.append(filter_name)
         
@@ -182,8 +206,18 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     
     # Read redshifts for all galaxies
     print("\nReading galaxy redshifts...")
-    with h5py.File(working_file, 'r') as f:
-        redshifts[:] = f['/Lightcone/Output1/nodeData/lightconeRedshiftObserved'][:n_galaxies]
+    if format_type == 'lightcone':
+        # Lightcone: per-galaxy redshifts
+        with h5py.File(working_file, 'r') as f:
+            redshifts[:] = f[f'{base_path}/nodeData/lightconeRedshiftObserved'][:n_galaxies]
+    else:
+        # Fixed-time: calculate redshift from outputTime
+        from SEDfromSFH import outputTime_to_redshift
+        with h5py.File(working_file, 'r') as f:
+            outputTime = f[base_path].attrs['outputTime']
+            redshift = outputTime_to_redshift(outputTime)
+            redshifts[:] = float(redshift)  # All galaxies at same redshift
+        print(f"  Fixed-time output at z={redshifts[0]:.4f} (outputTime={outputTime:.4f} Gyr)")
     
     # Calculate magnitudes for each galaxy
     print(f"\nCalculating magnitudes in {n_filters} filters for {n_galaxies} galaxies...")
@@ -228,13 +262,15 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         'magnitudes': magnitude_array,
         'filter_names': filter_names,
         'redshifts': redshifts,
-        'galaxy_indices': np.arange(n_galaxies)
+        'galaxy_indices': np.arange(n_galaxies),
+        'format_type': format_type,
+        'base_path': base_path
     }
     
     # Save to file
     if save_to_input:
         print(f"\nSaving magnitudes to Galacticus file: {working_file}...")
-        save_magnitudes_to_galacticus_file(working_file, results, component)
+        save_magnitudes_to_galacticus_file(working_file, results, component, format_type, base_path)
         results['output_file'] = working_file
     elif output_file is not None:
         print(f"\nSaving results to separate file: {output_file}...")
@@ -258,12 +294,15 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     return results
 
 
-def save_magnitudes_to_galacticus_file(galacticus_file, results, component='total'):
+def save_magnitudes_to_galacticus_file(galacticus_file, results, component='total', 
+                                       format_type=None, base_path=None):
     """
     Save magnitude data directly to the Galacticus HDF5 file.
     
     Magnitudes are saved to datasets with paths like:
     /Lightcone/Output1/nodeData/apparentMagnitudeRomanWFI:<filter>
+    or
+    /Outputs/Output1/nodeData/apparentMagnitudeRomanWFI:<filter>
     
     Parameters
     ----------
@@ -273,7 +312,15 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
         Results dictionary from calculate_catalog_magnitudes
     component : str, optional
         Component type used for magnitude calculation. Default is 'total'.
+    format_type : str, optional
+        Format type ('lightcone' or 'fixed-time'). If None, will be detected.
+    base_path : str, optional
+        Base path in HDF5 file. If None, will be detected.
     """
+    # Detect format if not provided
+    if format_type is None or base_path is None:
+        format_type, base_path = detect_galacticus_format(galacticus_file)
+    
     filter_names = results['filter_names']
     magnitude_array = results['magnitudes']
     n_galaxies = len(results['galaxy_indices'])
@@ -292,7 +339,7 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
     
     with h5py.File(galacticus_file, 'a') as f:
         # Create or access the nodeData group
-        node_data_path = '/Lightcone/Output1/nodeData'
+        node_data_path = f'{base_path}/nodeData'
         if node_data_path not in f:
             raise ValueError(f"Path {node_data_path} not found in {galacticus_file}")
         
