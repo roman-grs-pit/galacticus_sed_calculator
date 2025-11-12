@@ -206,5 +206,68 @@ class TestIntegrationWithEvaluateComponentSpectrum(unittest.TestCase):
                 os.unlink(tmp_filename)
 
 
+class TestCalculateMagnitudes(unittest.TestCase):
+    """Test the calculate_magnitudes method."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        self.sed_template_file = 'data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5'
+        self.galacticus_file = 'data/romanUNIT.hdf5'
+        self.calc = sed_calculator(self.sed_template_file)
+    
+    def test_calculate_magnitudes_method_exists(self):
+        """Test that calculate_magnitudes method exists and has correct signature."""
+        self.assertTrue(hasattr(self.calc, 'calculate_magnitudes'))
+        
+        # Check method is callable
+        self.assertTrue(callable(getattr(self.calc, 'calculate_magnitudes')))
+    
+    def test_calculate_magnitudes_invalid_component(self):
+        """Test that calculate_magnitudes raises error for invalid component."""
+        # Create a dummy bandpass
+        from synphot import SpectralElement
+        from synphot.models import Empirical1D
+        import astropy.units as u
+        
+        wavelengths = np.linspace(10000, 20000, 100) * u.AA
+        transmission = np.ones(100)
+        bandpass = SpectralElement(Empirical1D, points=wavelengths, lookup_table=transmission)
+        bandpasses = {'test': bandpass}
+        
+        # Test with invalid component
+        with self.assertRaises(ValueError) as context:
+            self.calc.calculate_magnitudes(
+                self.galacticus_file,
+                galIndex=0,
+                bandpasses=bandpasses,
+                component='invalid_component'
+            )
+        
+        self.assertIn('Invalid component', str(context.exception))
+    
+    def test_calculate_magnitudes_invalid_magnitude_system(self):
+        """Test that calculate_magnitudes raises error for invalid magnitude system."""
+        # Create a dummy bandpass
+        from synphot import SpectralElement
+        from synphot.models import Empirical1D
+        import astropy.units as u
+        
+        wavelengths = np.linspace(10000, 20000, 100) * u.AA
+        transmission = np.ones(100)
+        bandpass = SpectralElement(Empirical1D, points=wavelengths, lookup_table=transmission)
+        bandpasses = {'test': bandpass}
+        
+        # Test with invalid magnitude system
+        with self.assertRaises(ValueError) as context:
+            self.calc.calculate_magnitudes(
+                self.galacticus_file,
+                galIndex=0,
+                bandpasses=bandpasses,
+                magnitude_system='invalid_system'
+            )
+        
+        self.assertIn('Invalid magnitude_system', str(context.exception))
+
+
 if __name__ == '__main__':
     unittest.main()
