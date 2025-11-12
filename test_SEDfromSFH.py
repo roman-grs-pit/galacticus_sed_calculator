@@ -522,6 +522,34 @@ class TestFixedTimeFormat(unittest.TestCase):
         format_info = self.calc._file_formats[self.fixed_time_file]
         self.assertEqual(format_info[0], 'fixed-time')
         self.assertEqual(format_info[1], '/Outputs/Output1')
+    
+    def test_fixed_time_format_parameter_validation(self):
+        """Test that validation works with fixed-time format parameter names."""
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
+            tmp_filename = tmp.name
+        
+        try:
+            # Create a file with fixed-time format parameter names
+            with h5py.File(tmp_filename, 'w') as dst:
+                sfh_group = dst.create_group('/Parameters/starFormationHistory')
+                # Fixed-time format uses different attribute names
+                sfh_group.attrs['countMetallicities'] = 11
+                sfh_group.attrs['countTimeStepsMaximum'] = 50
+                sfh_group.attrs['metallicityMaximum'] = 10.0
+                sfh_group.attrs['metallicityMinimum'] = 0.0001
+                sfh_group.attrs['timeStepMinimum'] = 0.001
+                
+                # Create minimal Outputs structure
+                outputs = dst.create_group('/Outputs')
+                output1 = outputs.create_group('Output1')
+                output1.attrs['outputTime'] = 4.5
+            
+            # Should not raise an exception with fixed-time parameter names
+            self.calc.validate_sfh_compatibility(tmp_filename)
+            
+        finally:
+            if os.path.exists(tmp_filename):
+                os.unlink(tmp_filename)
 
 
 if __name__ == '__main__':
