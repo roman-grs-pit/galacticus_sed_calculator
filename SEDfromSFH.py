@@ -395,8 +395,16 @@ class sed_calculator:
         redshift = galData['redshift']
         if component in ['disk', 'spheroid']:
             SFH = galData[f'{component}SFH']
-            Fnu, wav = self.calculate_continuum_Fnu(SFH, redshift, obs_wavelengths, extrapolateWithZeros=True)
-            continuum_flux = SourceSpectrum(Empirical1D, points=wav, lookup_table=Fnu)
+            # Handle galaxies with empty SFH (e.g. due to having no spheroid)
+            if SFH.size == 0:
+                # Create zero continuum flux
+                if obs_wavelengths is None:
+                    obs_wavelengths = np.linspace(8000, 30000, 1000) * u.AA
+                continuum_flux = SourceSpectrum(Empirical1D, points=obs_wavelengths, 
+                                            lookup_table=np.zeros(len(obs_wavelengths)))
+            else:
+                Fnu, wav = self.calculate_continuum_Fnu(SFH, redshift, obs_wavelengths, extrapolateWithZeros=True)
+                continuum_flux = SourceSpectrum(Empirical1D, points=wav, lookup_table=Fnu)
         elif component == 'AGN':
             # zero continuum flux
             if obs_wavelengths is None:
