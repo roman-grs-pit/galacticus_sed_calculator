@@ -1,5 +1,8 @@
 """
 Tests for coordinate transformation functionality.
+
+Note: Galacticus lightcone angular coordinates (theta, phi) are in radians.
+Tests have been updated to reflect this.
 """
 import unittest
 import numpy as np
@@ -24,25 +27,26 @@ class TestCoordinateTransformation(unittest.TestCase):
         self.assertAlmostEqual(dec[0], 90.0, places=5)
     
     def test_theta_90_at_equator(self):
-        """Test that theta=90 gives points at the equator when Dec0=90."""
-        theta = np.array([90.0])
+        """Test that theta=π/2 gives points at the equator when Dec0=90."""
+        theta = np.array([np.pi/2])  # 90 degrees in radians
         phi = np.array([0.0])
         
         ra, dec = convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=90.0, roll=0.0)
         
-        # At theta=90 from north pole, we should be at equator
+        # At theta=π/2 from north pole, we should be at equator
         self.assertAlmostEqual(dec[0], 0.0, places=5)
         self.assertAlmostEqual(ra[0], 0.0, places=5)
     
     def test_phi_rotation(self):
         """Test that phi rotates around the field center."""
-        theta = np.array([10.0, 10.0, 10.0, 10.0])
-        phi = np.array([0.0, 90.0, 180.0, 270.0])
+        theta_deg = 10.0
+        theta = np.array([np.deg2rad(theta_deg)] * 4)
+        phi = np.array([0.0, np.pi/2, np.pi, 3*np.pi/2])  # 0, 90, 180, 270 deg in radians
         
         ra, dec = convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=90.0, roll=0.0)
         
         # All should be at same declination (small circle around pole)
-        np.testing.assert_array_almost_equal(dec, np.full(4, 90.0 - 10.0), decimal=5)
+        np.testing.assert_array_almost_equal(dec, np.full(4, 90.0 - theta_deg), decimal=5)
         
         # RA should differ by 90 degrees
         expected_ra = np.array([0.0, 90.0, 180.0, 270.0])
@@ -62,8 +66,8 @@ class TestCoordinateTransformation(unittest.TestCase):
     
     def test_roll_angle(self):
         """Test that roll angle rotates the field."""
-        # Point at phi=0, theta=10
-        theta = np.array([10.0])
+        # Point at phi=0, theta=10 degrees
+        theta = np.array([np.deg2rad(10.0)])
         phi = np.array([0.0])
         
         # Without roll
@@ -82,8 +86,8 @@ class TestCoordinateTransformation(unittest.TestCase):
     def test_array_shapes(self):
         """Test that function handles arrays correctly."""
         n = 100
-        theta = np.random.uniform(0, 5, n)
-        phi = np.random.uniform(0, 360, n)
+        theta = np.random.uniform(0, np.deg2rad(5), n)  # 0 to 5 degrees in radians
+        phi = np.random.uniform(0, 2*np.pi, n)  # 0 to 2π radians
         
         ra, dec = convert_lightcone_to_radec(theta, phi)
         
@@ -92,8 +96,8 @@ class TestCoordinateTransformation(unittest.TestCase):
     
     def test_ra_range(self):
         """Test that RA is in [0, 360) range."""
-        theta = np.random.uniform(0, 10, 1000)
-        phi = np.random.uniform(0, 360, 1000)
+        theta = np.random.uniform(0, np.deg2rad(10), 1000)  # 0 to 10 degrees in radians
+        phi = np.random.uniform(0, 2*np.pi, 1000)  # 0 to 2π radians
         
         ra, dec = convert_lightcone_to_radec(theta, phi, ra0=180.0, dec0=0.0)
         
@@ -102,8 +106,8 @@ class TestCoordinateTransformation(unittest.TestCase):
     
     def test_dec_range(self):
         """Test that Dec is in [-90, 90] range."""
-        theta = np.random.uniform(0, 90, 1000)
-        phi = np.random.uniform(0, 360, 1000)
+        theta = np.random.uniform(0, np.pi/2, 1000)  # 0 to 90 degrees in radians
+        phi = np.random.uniform(0, 2*np.pi, 1000)  # 0 to 2π radians
         
         ra, dec = convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=0.0)
         
@@ -112,21 +116,21 @@ class TestCoordinateTransformation(unittest.TestCase):
     
     def test_small_angles_precision(self):
         """Test precision for small angles near field center."""
-        # Very small theta values
-        theta = np.array([0.001, 0.01, 0.1])
-        phi = np.array([45.0, 45.0, 45.0])
+        # Very small theta values in radians
+        theta = np.array([0.001, 0.01, 0.1])  # radians (not degrees)
+        phi = np.array([np.deg2rad(45.0)] * 3)  # 45 degrees in radians
         
         ra, dec = convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=90.0, roll=0.0)
         
         # All should be very close to Dec=90
-        # theta=0.1 degrees means we're 0.1 degrees from pole, so dec should be > 89.9
-        self.assertTrue(np.all(dec > 89.8))
+        # theta=0.1 radians ≈ 5.7 degrees, so dec should be > 84
+        self.assertTrue(np.all(dec > 84.0))
     
     def test_reversibility_concept(self):
         """Test that small perturbations from field center behave as expected."""
         # Create a small cone around field center
-        theta = np.array([1.0, 1.0, 1.0, 1.0])
-        phi = np.array([0.0, 90.0, 180.0, 270.0])
+        theta = np.array([np.deg2rad(1.0)] * 4)  # 1 degree in radians
+        phi = np.array([0.0, np.pi/2, np.pi, 3*np.pi/2])  # 0, 90, 180, 270 deg
         
         ra0, dec0 = 45.0, 30.0
         ra, dec = convert_lightcone_to_radec(theta, phi, ra0=ra0, dec0=dec0, roll=0.0)
@@ -146,8 +150,8 @@ class TestCoordinateSymmetry(unittest.TestCase):
     def test_symmetry_around_poles(self):
         """Test that transformation is symmetric around field center."""
         # Points at equal theta but different phi
-        theta = np.array([5.0, 5.0, 5.0, 5.0])
-        phi = np.array([0.0, 90.0, 180.0, 270.0])
+        theta = np.array([np.deg2rad(5.0)] * 4)  # 5 degrees in radians
+        phi = np.array([0.0, np.pi/2, np.pi, 3*np.pi/2])  # 0, 90, 180, 270 deg
         
         ra, dec = convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=90.0, roll=0.0)
         
@@ -157,8 +161,8 @@ class TestCoordinateSymmetry(unittest.TestCase):
     
     def test_opposite_rolls_symmetry(self):
         """Test that opposite roll angles produce expected symmetry."""
-        theta = np.array([10.0])
-        phi = np.array([45.0])
+        theta = np.array([np.deg2rad(10.0)])
+        phi = np.array([np.deg2rad(45.0)])
         
         ra1, dec1 = convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=90.0, roll=30.0)
         ra2, dec2 = convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=90.0, roll=-30.0)
@@ -171,8 +175,8 @@ class TestEdgeCases(unittest.TestCase):
     """Test edge cases and boundary conditions."""
     
     def test_theta_180(self):
-        """Test theta=180 (opposite side of sphere)."""
-        theta = np.array([180.0])
+        """Test theta=π (opposite side of sphere)."""
+        theta = np.array([np.pi])  # 180 degrees in radians
         phi = np.array([0.0])
         
         ra, dec = convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=90.0, roll=0.0)
@@ -192,8 +196,8 @@ class TestEdgeCases(unittest.TestCase):
     
     def test_single_point(self):
         """Test with single point."""
-        theta = np.array([5.0])
-        phi = np.array([120.0])
+        theta = np.array([np.deg2rad(5.0)])
+        phi = np.array([np.deg2rad(120.0)])
         
         ra, dec = convert_lightcone_to_radec(theta, phi)
         

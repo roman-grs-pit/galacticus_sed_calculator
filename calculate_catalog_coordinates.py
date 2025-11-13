@@ -31,9 +31,9 @@ def convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=0.0, roll=0.0):
     Parameters
     ----------
     theta : array-like
-        Polar angle in degrees (0 at cone center)
+        Polar angle in radians (0 at cone center)
     phi : array-like
-        Azimuthal angle in degrees (0 to 360)
+        Azimuthal angle in radians (-π to π or 0 to 2π)
     ra0 : float, optional
         Right Ascension of the new field center in degrees (default: 0.0)
     dec0 : float, optional
@@ -58,14 +58,17 @@ def convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=0.0, roll=0.0):
     
     The original lightcone has theta=0 pointing "up" (Dec=90), and we rotate
     this to point at the desired field center.
+    
+    Note: Galacticus lightcone angular coordinates are in radians.
     """
     theta = np.asarray(theta)
     phi = np.asarray(phi)
     
     # Convert lightcone coordinates to Cartesian
     # theta=0 is at the north pole (z=1), theta increases toward equator
-    theta_rad = np.deg2rad(theta)
-    phi_rad = np.deg2rad(phi)
+    # Input theta and phi are already in radians (Galacticus native format)
+    theta_rad = theta
+    phi_rad = phi
     
     # Standard spherical to Cartesian: theta is polar angle from +z axis
     x = np.sin(theta_rad) * np.cos(phi_rad)

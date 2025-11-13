@@ -83,6 +83,8 @@ magnitudes = calc.calculate_magnitudes(
 
 For lightcone catalogs, convert the angular positions (theta, phi) to astronomical RA and Dec coordinates:
 
+**Note**: Galacticus lightcone coordinates (`lightconeAngularTheta` and `lightconeAngularPhi`) are stored in **radians**.
+
 ```bash
 # Basic usage - saves to new file with '_with_coordinates' suffix
 python calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
@@ -101,14 +103,16 @@ python calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
 This adds `rightAscension` and `declination` datasets to the catalog with the following features:
 - Field center repositioning: Place the cone center at any (RA, Dec) on the sky
 - Roll angle: Rotate the field around the line of sight
-- Preserves original theta/phi values
+- Preserves original theta/phi values (in radians)
 - Records transformation parameters in dataset attributes
+- Outputs RA/Dec in degrees
 
 The transformation process:
-1. Converts (theta, phi) polar coordinates to Cartesian on unit sphere
-2. Applies roll rotation around line of sight
-3. Rotates to reposition field center from (RA=0°, Dec=90°) to (RA0, Dec0)
-4. Converts back to (RA, Dec) spherical coordinates
+1. Reads (theta, phi) polar coordinates in radians from Galacticus
+2. Converts to Cartesian on unit sphere
+3. Applies roll rotation around line of sight
+4. Rotates to reposition field center from (RA=0°, Dec=90°) to (RA0, Dec0)
+5. Converts back to (RA, Dec) spherical coordinates in degrees
 
 ## Testing
 

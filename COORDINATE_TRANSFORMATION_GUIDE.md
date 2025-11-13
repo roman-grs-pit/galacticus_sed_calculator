@@ -59,21 +59,23 @@ You can also use the coordinate transformation directly in Python:
 from calculate_catalog_coordinates import convert_lightcone_to_radec
 import numpy as np
 
-# Your lightcone angular coordinates
-theta = np.array([0.1, 0.5, 1.0])  # degrees from field center
-phi = np.array([0, 90, 180])        # azimuthal angle
+# Your lightcone angular coordinates (in RADIANS - Galacticus native format)
+theta = np.array([0.001, 0.005, 0.01])  # radians from field center
+phi = np.array([0, np.pi/2, np.pi])     # azimuthal angle in radians
 
 # Convert to RA/Dec with field center at (150°, 30°)
 ra, dec = convert_lightcone_to_radec(
     theta, phi,
-    ra0=150.0,   # Field center RA
-    dec0=30.0,   # Field center Dec
-    roll=0.0     # Roll angle
+    ra0=150.0,   # Field center RA in degrees
+    dec0=30.0,   # Field center Dec in degrees
+    roll=0.0     # Roll angle in degrees
 )
 
-print(f"RA: {ra}")
-print(f"Dec: {dec}")
+print(f"RA: {ra}")   # Output in degrees
+print(f"Dec: {dec}") # Output in degrees
 ```
+
+**Important**: Galacticus lightcone coordinates (`lightconeAngularTheta` and `lightconeAngularPhi`) are stored in **radians**, not degrees. The function expects radians as input and returns RA/Dec in degrees.
 
 ### Process Entire Catalog
 
@@ -90,10 +92,10 @@ results = calculate_catalog_coordinates(
 )
 
 # Results contain:
-# - 'ra': array of RA values
-# - 'dec': array of Dec values
-# - 'theta': original theta values
-# - 'phi': original phi values
+# - 'ra': array of RA values (degrees)
+# - 'dec': array of Dec values (degrees)
+# - 'theta': original theta values (radians)
+# - 'phi': original phi values (radians)
 # - 'ra0', 'dec0', 'roll': transformation parameters
 ```
 
@@ -101,22 +103,23 @@ results = calculate_catalog_coordinates(
 
 ### Original Lightcone Coordinates
 
-- **theta**: Polar angle from field center (0 to ~few degrees)
-- **phi**: Azimuthal angle (0 to 360 degrees)
+- **theta**: Polar angle from field center in **radians** (typically 0 to ~0.1 rad)
+- **phi**: Azimuthal angle in **radians** (-π to π or 0 to 2π)
 - **Field center**: Originally at theta=0, pointing along +z axis
+- **Units**: Both theta and phi are in radians (Galacticus native format)
 
 ### Transformed Coordinates
 
-- **RA**: Right Ascension (0 to 360 degrees)
-- **Dec**: Declination (-90 to 90 degrees)
+- **RA**: Right Ascension in **degrees** (0 to 360)
+- **Dec**: Declination in **degrees** (-90 to 90)
 - **Field center**: Can be placed anywhere on the sky
 
 ### Transformation Process
 
-1. Convert (theta, phi) to Cartesian coordinates on unit sphere
+1. Convert (theta, phi) in radians to Cartesian coordinates on unit sphere
 2. Apply roll rotation around z-axis (line of sight)
 3. Rotate to move field center from (RA=0°, Dec=90°) to (RA0, Dec0)
-4. Convert back to spherical (RA, Dec) coordinates
+4. Convert back to spherical (RA, Dec) coordinates in degrees
 
 ## Output Format
 
