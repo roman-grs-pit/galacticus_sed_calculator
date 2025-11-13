@@ -403,13 +403,26 @@ class sed_calculator:
         # Get parameters from SED template
         sed_params = self.get_sed_template_parameters()
         
+        # Detect galaxy file format
+        galaxy_format, base_path = detect_galacticus_format(filename)
+        
+        # OPTION 1: Strict format matching
+        # SED template format must match galaxy file format
+        if sed_params.get('sedTemplateFormat') != galaxy_format:
+            raise ValueError(
+                f"SED template format ('{sed_params.get('sedTemplateFormat')}') does not match "
+                f"galaxy file format ('{galaxy_format}'). Lightcone SED templates can only be used "
+                f"with lightcone galaxy data, and fixed-time SED templates can only be used with "
+                f"fixed-time galaxy data, because the time binning algorithms are different."
+            )
+        
         # Read parameters from Galacticus file
         with h5py.File(filename, 'r') as f:
             if '/Parameters/starFormationHistory' not in f:
                 raise ValueError("No starFormationHistory parameters found in Galacticus file")
             
             sfh_group = f['/Parameters/starFormationHistory']
-            try:
+            if galaxy_format == 'lightcone':
                 sfh_params = {
                     'ageMinimum': sfh_group.attrs['ageMinimum'],
                     'countAges': sfh_group.attrs['countAges'],
@@ -417,14 +430,49 @@ class sed_calculator:
                     'metallicityMaximum': sfh_group.attrs['metallicityMaximum'],
                     'countMetallicities': sfh_group.attrs['countMetallicities']
                 }
-            except KeyError:
+            else:  # fixed-time
                 sfh_params = {
                     'ageMinimum': sfh_group.attrs['timeStepMinimum'],
                     'countAges': sfh_group.attrs['countTimeStepsMaximum'],
                     'metallicityMinimum': sfh_group.attrs['metallicityMinimum'],
                     'metallicityMaximum': sfh_group.attrs['metallicityMaximum'],
                     'countMetallicities': sfh_group.attrs['countMetallicities']
-                } 
+                }
+                
+                # OPTION 2: For fixed-time, validate that time arrays match
+                # Get time array from galaxy file (from SFH dataset attribute)
+                node_data_path = f"{base_path}/nodeData"
+                if node_data_path in f:
+                    disk_sfh_path = f"{node_data_path}/diskStarFormationHistoryMass"
+                    if disk_sfh_path in f and 'time' in f[disk_sfh_path].attrs:
+                        galaxy_times = f[disk_sfh_path].attrs['time']
+                        
+                        # Compare with SED template times
+                        if hasattr(self, 'sedTime'):
+                            if len(galaxy_times) != len(self.sedTime):
+                                raise ValueError(
+                                    f"Fixed-time: time array length mismatch. "
+                                    f"Galaxy file has {len(galaxy_times)} time bins, "
+                                    f"SED template has {len(self.sedTime)} time bins."
+                                )
+                            
+                            # Check that time values match (within tolerance)
+                            time_tol = 1e-5  # Relative tolerance for time comparison
+                            if not np.allclose(galaxy_times, self.sedTime, rtol=time_tol):
+                                max_diff = np.max(np.abs(galaxy_times - self.sedTime))
+                                # Avoid divide by zero - use absolute comparison for small values
+                                nonzero_mask = np.abs(self.sedTime) > 1e-10
+                                if np.any(nonzero_mask):
+                                    max_rel_diff = np.max(np.abs((galaxy_times[nonzero_mask] - self.sedTime[nonzero_mask]) / self.sedTime[nonzero_mask]))
+                                else:
+                                    max_rel_diff = 0.0
+                                raise ValueError(
+                                    f"Fixed-time: time arrays do not match. "
+                                    f"Max absolute difference: {max_diff:.6e} Gyr, "
+                                    f"Max relative difference: {max_rel_diff:.6e}. "
+                                    f"The SED template and galaxy file must have been generated "
+                                    f"with the same Galacticus time binning parameters."
+                                )
         
         # Compare parameters
         errors = []
@@ -439,12 +487,11 @@ class sed_calculator:
         # Check boundaries with some tolerance for floating point comparison
         rel_tol = 1e-6
         
-        # For lightcone format, ageMinimum is the minimum stellar age
-        # For fixed-time format, it's timeStepMinimum (minimum bin width), which doesn't
-        # directly correspond to anything in the SED template, so we skip this check
-        # The SED template's actual time bins are determined by the Galacticus algorithm
-        # and we validate compatibility through countAges instead
-        if sed_params.get('sedTemplateFormat') == 'lightcone':
+        # For lightcone format, validate ageMinimum
+        # For fixed-time format, ageMinimum is actually timeStepMinimum (minimum bin width)
+        # which doesn't directly appear in the SED template, but we've already validated
+        # the time arrays match above for fixed-time
+        if galaxy_format == 'lightcone':
             if not np.isclose(sfh_params['ageMinimum'], sed_params['ageMinimum'], rtol=rel_tol):
                 errors.append(f"ageMinimum mismatch: SFH={sfh_params['ageMinimum']}, SED template={sed_params['ageMinimum']}")
         

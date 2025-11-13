@@ -525,16 +525,38 @@ class TestFixedTimeFormat(unittest.TestCase):
     
     def test_fixed_time_format_parameter_validation(self):
         """Test that validation works with fixed-time format parameter names."""
-        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
-            tmp_filename = tmp.name
+        import tempfile
+        
+        # Create a fixed-time SED template
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp_sed:
+            tmp_sed_filename = tmp_sed.name
+        
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp_gal:
+            tmp_gal_filename = tmp_gal.name
         
         try:
-            # Create a file with fixed-time format parameter names
-            with h5py.File(tmp_filename, 'w') as dst:
+            # Create fixed-time SED template
+            with h5py.File(self.sed_template_file, 'r') as src:
+                ages = src['ages'][:]
+                sedTemplate = src['sedTemplate'][:]
+                metallicity = src['metallicity'][:]
+                wavelength = src['wavelength'][:]
+                
+                outputTime = ages[0]
+                times = outputTime - ages
+            
+            with h5py.File(tmp_sed_filename, 'w') as dst:
+                dst.create_dataset('time', data=times)
+                dst.create_dataset('sedTemplate', data=np.flip(sedTemplate, axis=1))
+                dst.create_dataset('metallicity', data=metallicity)
+                dst.create_dataset('wavelength', data=wavelength)
+            
+            # Create fixed-time galaxy file with matching parameters and time array
+            with h5py.File(tmp_gal_filename, 'w') as dst:
                 sfh_group = dst.create_group('/Parameters/starFormationHistory')
                 # Fixed-time format uses different attribute names
                 sfh_group.attrs['countMetallicities'] = 11
-                sfh_group.attrs['countTimeStepsMaximum'] = 50
+                sfh_group.attrs['countTimeStepsMaximum'] = len(times)  # Match actual time array length
                 sfh_group.attrs['metallicityMaximum'] = 10.0
                 sfh_group.attrs['metallicityMinimum'] = 0.0001
                 sfh_group.attrs['timeStepMinimum'] = 0.001
@@ -542,14 +564,24 @@ class TestFixedTimeFormat(unittest.TestCase):
                 # Create minimal Outputs structure
                 outputs = dst.create_group('/Outputs')
                 output1 = outputs.create_group('Output1')
-                output1.attrs['outputTime'] = 4.5
+                output1.attrs['outputTime'] = outputTime
+                node_data = output1.create_group('nodeData')
+                
+                # Add SFH dataset with time attribute that matches SED template
+                diskSFH = node_data.create_dataset('diskStarFormationHistoryMass',
+                                                   shape=(1,), dtype=h5py.vlen_dtype(np.dtype('float64')))
+                diskSFH[0] = np.zeros((11, len(times))).flatten()
+                diskSFH.attrs['time'] = times
             
-            # Should not raise an exception with fixed-time parameter names
-            self.calc.validate_sfh_compatibility(tmp_filename)
+            # Should not raise an exception with fixed-time parameter names and matching times
+            calc = sed_calculator(tmp_sed_filename)
+            calc.validate_sfh_compatibility(tmp_gal_filename)
             
         finally:
-            if os.path.exists(tmp_filename):
-                os.unlink(tmp_filename)
+            if os.path.exists(tmp_sed_filename):
+                os.unlink(tmp_sed_filename)
+            if os.path.exists(tmp_gal_filename):
+                os.unlink(tmp_gal_filename)
 
 
 class TestSEDTemplateFormats(unittest.TestCase):
@@ -655,6 +687,201 @@ class TestSEDTemplateFormats(unittest.TestCase):
         finally:
             if os.path.exists(tmp_filename):
                 os.unlink(tmp_filename)
+
+
+class TestFormatValidation(unittest.TestCase):
+    """Test strict format validation between SED templates and galaxy files."""
+    
+    def test_lightcone_template_with_lightcone_galaxy_passes(self):
+        """Test that lightcone template with lightcone galaxy passes validation."""
+        import tempfile
+        
+        # Use existing lightcone SED template
+        sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
+        calc = sed_calculator(sed_template_file)
+        
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
+            tmp_filename = tmp.name
+        
+        try:
+            # Create lightcone galaxy file
+            with h5py.File(tmp_filename, 'w') as f:
+                params = f.create_group('/Parameters')
+                sfh = params.create_group('starFormationHistory')
+                sfh.attrs['ageMinimum'] = 0.001
+                sfh.attrs['countAges'] = 50
+                sfh.attrs['metallicityMinimum'] = 0.0001
+                sfh.attrs['metallicityMaximum'] = 10.0
+                sfh.attrs['countMetallicities'] = 11
+                
+                lightcone = f.create_group('/Lightcone')
+                output1 = lightcone.create_group('Output1')
+                node_data = output1.create_group('nodeData')
+            
+            # Should pass
+            calc.validate_sfh_compatibility(tmp_filename)
+            
+        finally:
+            if os.path.exists(tmp_filename):
+                os.unlink(tmp_filename)
+    
+    def test_lightcone_template_with_fixed_time_galaxy_fails(self):
+        """Test that lightcone template with fixed-time galaxy fails validation."""
+        import tempfile
+        
+        sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
+        calc = sed_calculator(sed_template_file)
+        
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
+            tmp_filename = tmp.name
+        
+        try:
+            # Create fixed-time galaxy file
+            with h5py.File(tmp_filename, 'w') as f:
+                params = f.create_group('/Parameters')
+                sfh = params.create_group('starFormationHistory')
+                sfh.attrs['timeStepMinimum'] = 0.001
+                sfh.attrs['countTimeStepsMaximum'] = 50
+                sfh.attrs['metallicityMinimum'] = 0.0001
+                sfh.attrs['metallicityMaximum'] = 10.0
+                sfh.attrs['countMetallicities'] = 11
+                
+                outputs = f.create_group('/Outputs')
+                output1 = outputs.create_group('Output1')
+                output1.attrs['outputTime'] = 3.5
+                node_data = output1.create_group('nodeData')
+            
+            # Should fail with format mismatch
+            with self.assertRaises(ValueError) as context:
+                calc.validate_sfh_compatibility(tmp_filename)
+            
+            self.assertIn('does not match', str(context.exception))
+            self.assertIn('lightcone', str(context.exception))
+            self.assertIn('fixed-time', str(context.exception))
+            
+        finally:
+            if os.path.exists(tmp_filename):
+                os.unlink(tmp_filename)
+    
+    def test_fixed_time_template_with_matching_time_array_passes(self):
+        """Test that fixed-time template with matching time array passes validation."""
+        import tempfile
+        
+        # Create fixed-time SED template
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp_sed:
+            tmp_sed_filename = tmp_sed.name
+        
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp_gal:
+            tmp_gal_filename = tmp_gal.name
+        
+        try:
+            # Load lightcone template and convert to fixed-time
+            with h5py.File('data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5', 'r') as src:
+                ages = src['ages'][:]
+                sedTemplate = src['sedTemplate'][:]
+                metallicity = src['metallicity'][:]
+                wavelength = src['wavelength'][:]
+                
+                outputTime = ages[0]
+                times = outputTime - ages
+            
+            with h5py.File(tmp_sed_filename, 'w') as dst:
+                dst.create_dataset('time', data=times)
+                dst.create_dataset('sedTemplate', data=np.flip(sedTemplate, axis=1))
+                dst.create_dataset('metallicity', data=metallicity)
+                dst.create_dataset('wavelength', data=wavelength)
+            
+            # Create fixed-time galaxy file with MATCHING time array
+            with h5py.File(tmp_gal_filename, 'w') as f:
+                params = f.create_group('/Parameters')
+                sfh = params.create_group('starFormationHistory')
+                sfh.attrs['timeStepMinimum'] = 0.001
+                sfh.attrs['countTimeStepsMaximum'] = len(times)
+                sfh.attrs['metallicityMinimum'] = 0.0001
+                sfh.attrs['metallicityMaximum'] = 10.0
+                sfh.attrs['countMetallicities'] = 11
+                
+                outputs = f.create_group('/Outputs')
+                output1 = outputs.create_group('Output1')
+                output1.attrs['outputTime'] = outputTime
+                node_data = output1.create_group('nodeData')
+                
+                diskSFH = node_data.create_dataset('diskStarFormationHistoryMass',
+                                                   shape=(1,), dtype=h5py.vlen_dtype(np.dtype('float64')))
+                diskSFH[0] = np.zeros((11, len(times))).flatten()
+                diskSFH.attrs['time'] = times  # Same times as SED template
+            
+            # Should pass
+            calc = sed_calculator(tmp_sed_filename)
+            calc.validate_sfh_compatibility(tmp_gal_filename)
+            
+        finally:
+            if os.path.exists(tmp_sed_filename):
+                os.unlink(tmp_sed_filename)
+            if os.path.exists(tmp_gal_filename):
+                os.unlink(tmp_gal_filename)
+    
+    def test_fixed_time_template_with_mismatched_time_array_fails(self):
+        """Test that fixed-time template with mismatched time array fails validation."""
+        import tempfile
+        
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp_sed:
+            tmp_sed_filename = tmp_sed.name
+        
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp_gal:
+            tmp_gal_filename = tmp_gal.name
+        
+        try:
+            # Load lightcone template and convert to fixed-time
+            with h5py.File('data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5', 'r') as src:
+                ages = src['ages'][:]
+                sedTemplate = src['sedTemplate'][:]
+                metallicity = src['metallicity'][:]
+                wavelength = src['wavelength'][:]
+                
+                outputTime = ages[0]
+                times = outputTime - ages
+            
+            with h5py.File(tmp_sed_filename, 'w') as dst:
+                dst.create_dataset('time', data=times)
+                dst.create_dataset('sedTemplate', data=np.flip(sedTemplate, axis=1))
+                dst.create_dataset('metallicity', data=metallicity)
+                dst.create_dataset('wavelength', data=wavelength)
+            
+            # Create fixed-time galaxy file with DIFFERENT time array
+            different_times = times * 1.05  # 5% different - should fail
+            
+            with h5py.File(tmp_gal_filename, 'w') as f:
+                params = f.create_group('/Parameters')
+                sfh = params.create_group('starFormationHistory')
+                sfh.attrs['timeStepMinimum'] = 0.001
+                sfh.attrs['countTimeStepsMaximum'] = len(different_times)
+                sfh.attrs['metallicityMinimum'] = 0.0001
+                sfh.attrs['metallicityMaximum'] = 10.0
+                sfh.attrs['countMetallicities'] = 11
+                
+                outputs = f.create_group('/Outputs')
+                output1 = outputs.create_group('Output1')
+                output1.attrs['outputTime'] = outputTime * 1.05
+                node_data = output1.create_group('nodeData')
+                
+                diskSFH = node_data.create_dataset('diskStarFormationHistoryMass',
+                                                   shape=(1,), dtype=h5py.vlen_dtype(np.dtype('float64')))
+                diskSFH[0] = np.zeros((11, len(different_times))).flatten()
+                diskSFH.attrs['time'] = different_times  # Different times
+            
+            # Should fail with time array mismatch
+            calc = sed_calculator(tmp_sed_filename)
+            with self.assertRaises(ValueError) as context:
+                calc.validate_sfh_compatibility(tmp_gal_filename)
+            
+            self.assertIn('time arrays do not match', str(context.exception))
+            
+        finally:
+            if os.path.exists(tmp_sed_filename):
+                os.unlink(tmp_sed_filename)
+            if os.path.exists(tmp_gal_filename):
+                os.unlink(tmp_gal_filename)
 
 
 if __name__ == '__main__':
