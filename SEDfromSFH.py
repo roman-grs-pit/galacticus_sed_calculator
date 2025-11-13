@@ -257,51 +257,86 @@ class sed_calculator:
         return config
 
     def load_sed_template(self):
-        # Load the SED template from the given filename
+        """
+        Load the SED template from the given filename.
+        
+        Supports both lightcone and fixed-time SED template formats:
+        - Lightcone: uses /ages (stellar ages/lookback times)
+        - Fixed-time: uses /time (cosmic time)
+        """
         with h5py.File(self.sedTemplateFilename, 'r') as f:
             self.sedTemplate = f['sedTemplate'][:]
-            self.sedAges = f['ages'][:]
             self.sedMetallicity = f['metallicity'][:]
             self.sedWavelength = f['wavelength'][:]
+            
+            # Detect SED template format
+            if 'ages' in f:
+                # Lightcone format: stellar ages (lookback times)
+                self.sedAges = f['ages'][:]
+                self.sedTemplateFormat = 'lightcone'
+            elif 'time' in f:
+                # Fixed-time format: cosmic times
+                self.sedTime = f['time'][:]
+                self.sedTemplateFormat = 'fixed-time'
+                # For backward compatibility, also store as sedAges
+                # (will be converted to lookback times when used with galaxy data)
+                self.sedAges = self.sedTime.copy()
+            else:
+                raise ValueError("SED template must contain either 'ages' (lightcone) or 'time' (fixed-time) dataset")
     
     def get_sed_template_parameters(self):
         """
         Extract the star formation history parameters from the SED template.
         
-        The SED template stores bin maximum values in sedAges and sedMetallicity.
-        This function reconstructs the parameters that would have been used to 
-        generate these bins according to the Galacticus starFormationHistoryFixedAges
-        class specification.
+        The SED template stores bin maximum values in sedAges (for lightcone) or 
+        sedTime (for fixed-time). This function reconstructs the parameters that 
+        would have been used to generate these bins.
+        
+        For lightcone templates: sedAges contains lookback times in descending order
+        For fixed-time templates: sedTime contains cosmic times in ascending order
         
         Returns
         -------
         dict
             Dictionary containing:
-            - ageMinimum: minimum age bin boundary (Gyr)
-            - ageMaximum: maximum age bin boundary (Gyr), typically age of universe
-            - countAges: number of age bins (excluding the zero-age bin)
+            - ageMinimum: minimum age/time bin boundary (Gyr)
+            - ageMaximum: maximum age/time bin boundary (Gyr)
+            - countAges: number of age/time bins (excluding the zero-age bin)
             - metallicityMinimum: minimum metallicity bin boundary (Solar units)
             - metallicityMaximum: maximum metallicity bin boundary (Solar units)
             - countMetallicities: number of metallicity bins (excluding the infinity bin)
+            - sedTemplateFormat: 'lightcone' or 'fixed-time'
         """
-        # Ages are stored in descending order (lookback time)
-        # The last non-zero age is the minimum
-        # The first age is the maximum (age of universe)
-        # There's always an additional bin at age=0
-        
-        # Find the index of the zero-age bin
-        zero_age_idx = np.where(self.sedAges < 1e-10)[0]
-        if len(zero_age_idx) > 0:
-            # Exclude the zero-age bin from the count
-            non_zero_ages = self.sedAges[:zero_age_idx[0]]
-            countAges = len(non_zero_ages)
-            ageMaximum = non_zero_ages[0]
-            ageMinimum = non_zero_ages[-1]
-        else:
-            # No explicit zero bin, but there should be
-            countAges = len(self.sedAges) - 1
-            ageMaximum = self.sedAges[0]
-            ageMinimum = self.sedAges[-1]
+        # Handle both lightcone (ages in descending order) and fixed-time (time in ascending order)
+        if self.sedTemplateFormat == 'lightcone':
+            # Ages are stored in descending order (lookback time)
+            # The last non-zero age is the minimum
+            # The first age is the maximum (age of universe)
+            # There's always an additional bin at age=0
+            
+            # Find the index of the zero-age bin
+            zero_age_idx = np.where(self.sedAges < 1e-10)[0]
+            if len(zero_age_idx) > 0:
+                # Exclude the zero-age bin from the count
+                non_zero_ages = self.sedAges[:zero_age_idx[0]]
+                countAges = len(non_zero_ages)
+                ageMaximum = non_zero_ages[0]
+                ageMinimum = non_zero_ages[-1]
+            else:
+                # No explicit zero bin, but there should be
+                countAges = len(self.sedAges) - 1
+                ageMaximum = self.sedAges[0]
+                ageMinimum = self.sedAges[-1]
+        else:  # fixed-time
+            # Times are in ascending order (cosmic time)
+            # For fixed-time, we use timeStepMinimum instead of ageMinimum
+            # The first time is the minimum, last is the maximum (output time)
+            if len(self.sedTime) > 0:
+                countAges = len(self.sedTime) - 1  # One less than number of bin edges
+                ageMinimum = self.sedTime[0]  # Actually timeStepMinimum
+                ageMaximum = self.sedTime[-1]  # Actually outputTime
+            else:
+                raise ValueError("SED template has no time bins")
         
         # Metallicity: bins are logarithmically spaced
         # The first bin starts at the first value (which represents the max of the first bin)
@@ -332,7 +367,8 @@ class sed_calculator:
             'countAges': countAges,
             'metallicityMinimum': metallicityMinimum,
             'metallicityMaximum': metallicityMaximum,
-            'countMetallicities': countMetallicities
+            'countMetallicities': countMetallicities,
+            'sedTemplateFormat': self.sedTemplateFormat
         }
     
     def validate_sfh_compatibility(self, filename):

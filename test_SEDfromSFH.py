@@ -552,5 +552,103 @@ class TestFixedTimeFormat(unittest.TestCase):
                 os.unlink(tmp_filename)
 
 
+class TestSEDTemplateFormats(unittest.TestCase):
+    """Test support for different SED template formats."""
+    
+    def test_lightcone_sed_template(self):
+        """Test that lightcone SED templates (with /ages) load correctly."""
+        sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
+        calc = sed_calculator(sed_template_file)
+        
+        # Check format was detected correctly
+        self.assertEqual(calc.sedTemplateFormat, 'lightcone')
+        
+        # Check that sedAges was loaded
+        self.assertTrue(hasattr(calc, 'sedAges'))
+        self.assertGreater(len(calc.sedAges), 0)
+        
+        # Check parameters extraction
+        params = calc.get_sed_template_parameters()
+        self.assertIn('sedTemplateFormat', params)
+        self.assertEqual(params['sedTemplateFormat'], 'lightcone')
+        self.assertGreater(params['countAges'], 0)
+    
+    def test_fixed_time_sed_template(self):
+        """Test that fixed-time SED templates (with /time) load correctly."""
+        import tempfile
+        
+        # Create a test fixed-time SED template
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
+            tmp_filename = tmp.name
+        
+        try:
+            # Load lightcone template to convert
+            lightcone_sed = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
+            with h5py.File(lightcone_sed, 'r') as src:
+                ages = src['ages'][:]
+                sedTemplate = src['sedTemplate'][:]
+                metallicity = src['metallicity'][:]
+                wavelength = src['wavelength'][:]
+                
+                # Convert to cosmic time (ascending)
+                outputTime = ages[0]
+                times = outputTime - ages
+            
+            # Create fixed-time template
+            with h5py.File(tmp_filename, 'w') as dst:
+                dst.create_dataset('time', data=times)
+                dst.create_dataset('sedTemplate', data=np.flip(sedTemplate, axis=1))
+                dst.create_dataset('metallicity', data=metallicity)
+                dst.create_dataset('wavelength', data=wavelength)
+            
+            # Load and test
+            calc = sed_calculator(tmp_filename)
+            
+            # Check format was detected correctly
+            self.assertEqual(calc.sedTemplateFormat, 'fixed-time')
+            
+            # Check that sedTime was loaded
+            self.assertTrue(hasattr(calc, 'sedTime'))
+            self.assertGreater(len(calc.sedTime), 0)
+            
+            # Check that sedTime is in ascending order (cosmic time)
+            self.assertTrue(np.all(np.diff(calc.sedTime) >= 0))
+            
+            # Check parameters extraction
+            params = calc.get_sed_template_parameters()
+            self.assertIn('sedTemplateFormat', params)
+            self.assertEqual(params['sedTemplateFormat'], 'fixed-time')
+            self.assertGreater(params['countAges'], 0)
+            
+        finally:
+            if os.path.exists(tmp_filename):
+                os.unlink(tmp_filename)
+    
+    def test_sed_template_missing_time_data(self):
+        """Test that SED template without ages or time raises error."""
+        import tempfile
+        
+        with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
+            tmp_filename = tmp.name
+        
+        try:
+            # Create an invalid SED template without ages or time
+            with h5py.File(tmp_filename, 'w') as dst:
+                dst.create_dataset('sedTemplate', data=np.zeros((12, 51, 369)))
+                dst.create_dataset('metallicity', data=np.zeros(12))
+                dst.create_dataset('wavelength', data=np.zeros(369))
+            
+            # Should raise ValueError
+            with self.assertRaises(ValueError) as context:
+                sed_calculator(tmp_filename)
+            
+            self.assertIn('ages', str(context.exception))
+            self.assertIn('time', str(context.exception))
+            
+        finally:
+            if os.path.exists(tmp_filename):
+                os.unlink(tmp_filename)
+
+
 if __name__ == '__main__':
     unittest.main()
