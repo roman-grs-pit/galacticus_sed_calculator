@@ -7,6 +7,7 @@ Classes and methods to generate spectra for galaxies simulated with Galacticus, 
 - **SED calculation**: Generate rest-frame and observed-frame SEDs from star formation histories
 - **Spectrum generation**: Create full spectra including continuum and emission lines
 - **Magnitude calculation**: Calculate observed magnitudes in arbitrary bandpasses
+- **Coordinate transformation**: Convert lightcone angular positions to RA/Dec with field repositioning
 - **Cross-validation**: Compare results from different Galacticus output formats
 
 ## Supported Galacticus Output Formats
@@ -78,11 +79,47 @@ magnitudes = calc.calculate_magnitudes(
 )
 ```
 
+### Calculate RA and Dec Coordinates
+
+For lightcone catalogs, convert the angular positions (theta, phi) to astronomical RA and Dec coordinates:
+
+**Note**: Galacticus lightcone coordinates (`lightconeAngularTheta` and `lightconeAngularPhi`) are stored in **radians**.
+
+```bash
+# Basic usage - saves to new file with '_with_coordinates' suffix
+python calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
+    --ra0 150 --dec0 30 --roll 0
+
+# Save to separate file instead
+python calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
+    --ra0 150 --dec0 30 --roll 0 \
+    --save-to-file coordinates.hdf5
+
+# Reposition field center to different location
+python calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
+    --ra0 45.5 --dec0 -12.3 --roll 15
+```
+
+This adds `rightAscension` and `declination` datasets to the catalog with the following features:
+- Field center repositioning: Place the cone center at any (RA, Dec) on the sky
+- Roll angle: Rotate the field around the line of sight
+- Preserves original theta/phi values (in radians)
+- Records transformation parameters in dataset attributes
+- Outputs RA/Dec in degrees
+
+The transformation process:
+1. Reads (theta, phi) polar coordinates in radians from Galacticus
+2. Converts to Cartesian on unit sphere
+3. Applies roll rotation around line of sight
+4. Rotates to reposition field center from (RA=0°, Dec=90°) to (RA0, Dec0)
+5. Converts back to (RA, Dec) spherical coordinates in degrees
+
 ## Testing
 
-Run tests with pytest:
+Run tests with unittest:
 ```bash
-pytest test_SEDfromSFH.py
+python -m unittest test_SEDfromSFH
+python -m unittest test_coordinates
 ```
 
 ## Implementation Details
