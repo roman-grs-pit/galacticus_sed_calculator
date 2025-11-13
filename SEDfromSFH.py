@@ -59,6 +59,83 @@ def process_wavelength_array(wavelengths):
         wavelengths = wavelengths * u.AA
     return wavelengths.to(u.AA)
 
+def detect_galacticus_format(filename):
+    """
+    Auto-detect whether a Galacticus file uses lightcone or fixed-time output format.
+    
+    Parameters
+    ----------
+    filename : str
+        Path to the Galacticus HDF5 file
+        
+    Returns
+    -------
+    format_type : str
+        Either 'lightcone' or 'fixed-time'
+    base_path : str
+        Base path to nodeData (e.g., '/Lightcone/Output1' or '/Outputs/Output1')
+    """
+    with h5py.File(filename, 'r') as f:
+        if 'Lightcone' in f:
+            return 'lightcone', '/Lightcone/Output1'
+        elif 'Outputs' in f:
+            # Find first output (usually Output1, but could be Output2, etc.)
+            outputs = [key for key in f['/Outputs'].keys() if key.startswith('Output')]
+            if outputs:
+                # Sort to get the first output numerically
+                outputs.sort(key=lambda x: int(x.replace('Output', '')))
+                return 'fixed-time', f'/Outputs/{outputs[0]}'
+            else:
+                raise ValueError("Found /Outputs group but no Output* subgroups")
+        else:
+            raise ValueError("Cannot determine format: neither /Lightcone nor /Outputs found in file")
+
+def outputTime_to_redshift(outputTime, cosmo=Planck15):
+    """
+    Convert age of universe (outputTime) to redshift.
+    
+    Parameters
+    ----------
+    outputTime : float
+        Age of universe in Gyr
+    cosmo : astropy.cosmology
+        Cosmology object (default: Planck15)
+        
+    Returns
+    -------
+    redshift : float
+        Redshift corresponding to the output time
+    """
+    from astropy.cosmology import z_at_value
+    return z_at_value(cosmo.age, outputTime * u.Gyr)
+
+def age_of_universe_to_lookback_time(times, outputTime):
+    """
+    Convert age-of-universe times to lookback times (stellar ages).
+    
+    In fixed-time output format, times are stored as age of universe.
+    We need lookback times for SED calculation: lookback_time = outputTime - age_of_universe
+    
+    Parameters
+    ----------
+    times : array-like
+        Ages of universe in Gyr (time bin edges)
+    outputTime : float
+        Age of universe at output time in Gyr
+        
+    Returns
+    -------
+    lookback_times : ndarray
+        Lookback times in Gyr
+    """
+    times = np.asarray(times)
+    lookback_times = outputTime - times
+    # Ensure non-negative (can have small numerical errors)
+    lookback_times = np.maximum(lookback_times, 0.0)
+    return lookback_times
+
+# Default configuration for lightcone format
+# Note: This is now auto-detected and adjusted based on file format
 galacticus_sed_config = {
     'diskSedPath': '/Lightcone/Output1/nodeData/diskStellarSED:identity',
     'spheroidSedPath': '/Lightcone/Output1/nodeData/spheroidStellarSED:identity',
@@ -94,7 +171,7 @@ def getLineNames(f, component='disk', verbose=False):
     lineNames = f[line_group].attrs['lineNames']
     return lineNames
 
-def getLineProperties(fname, component='disk', galIndex=None, hdf5_base_path = '/Lightcone/Output1/nodeData/luminosityEmissionLine'):
+def getLineProperties(fname, component='disk', galIndex=None, hdf5_base_path=None):
     """
     Get the emission line names, wavelengths, and luminosities for a given component from the Galacticus output file.
     
@@ -102,13 +179,19 @@ def getLineProperties(fname, component='disk', galIndex=None, hdf5_base_path = '
     - fname: str, path to the Galacticus output HDF5 file.
     - component: str, 'disk', 'AGN', or 'spheroid' to specify which component's emission lines to retrieve.
     - galIndex: int or None, index of the galaxy to retrieve line luminosities for. If None, retrieves all galaxies.
-    - hdf5_base_path: str, base path for the HDF5 file structure where emission line data is stored.
+    - hdf5_base_path: str or None, base path for the HDF5 file structure where emission line data is stored.
+      If None, will auto-detect based on file format (lightcone vs fixed-time).
     
     Returns:
     - lineNames: np.ndarray of emission line names.
     - lineWavelengths: np.ndarray of wavelengths corresponding to the emission lines.
     - lineLuminosities: np.ndarray of luminosities for the emission lines.
     """
+    # Auto-detect base path if not provided
+    if hdf5_base_path is None:
+        format_type, base_path = detect_galacticus_format(fname)
+        hdf5_base_path = f'{base_path}/nodeData/luminosityEmissionLine'
+    
     with h5py.File(fname, 'r') as f:
         lineNamesBytes = getLineNames(f, component=component)
         # Convert to regular strings
@@ -133,53 +216,132 @@ class sed_calculator:
         self.cosmo = cosmology
         # Cache for validated files to avoid repeated validation
         self._validated_files = set()
+        # Cache for detected file formats
+        self._file_formats = {}
+    
+    def _get_config_for_format(self, format_type, base_path):
+        """
+        Generate config dictionary for a specific format type.
+        
+        Parameters
+        ----------
+        format_type : str
+            'lightcone' or 'fixed-time'
+        base_path : str
+            Base path like '/Lightcone/Output1' or '/Outputs/Output1'
+            
+        Returns
+        -------
+        config : dict
+            Configuration dictionary with format-specific paths
+        """
+        node_data_path = f'{base_path}/nodeData'
+        
+        config = {
+            'format_type': format_type,
+            'base_path': base_path,
+            'diskSedPath': f'{node_data_path}/diskStellarSED:identity',
+            'spheroidSedPath': f'{node_data_path}/spheroidStellarSED:identity',
+            'diskSedWavelengths': f'{node_data_path}/diskStellarSED:identityColumnValues',
+            'spheroidSedWavelengths': f'{node_data_path}/spheroidStellarSED:identityColumnValues',
+            'diskSFH': f'{node_data_path}/diskStarFormationHistoryMass',
+            'spheroidSFH': f'{node_data_path}/spheroidStarFormationHistoryMass',
+        }
+        
+        if format_type == 'lightcone':
+            config['redshift'] = f'{node_data_path}/lightconeRedshiftObserved'
+            config['diskSFH_times'] = f'{node_data_path}/diskStarFormationHistoryTimes'
+            config['spheroidSFH_times'] = f'{node_data_path}/spheroidStarFormationHistoryTimes'
+        # For fixed-time format, redshift and times are handled differently (not in config)
+        
+        return config
 
     def load_sed_template(self):
-        # Load the SED template from the given filename
+        """
+        Load the SED template from the given filename.
+        
+        Supports both lightcone and fixed-time SED template formats:
+        - Lightcone: uses /ages (stellar ages/lookback times)
+        - Fixed-time: uses /time (cosmic time)
+        """
         with h5py.File(self.sedTemplateFilename, 'r') as f:
             self.sedTemplate = f['sedTemplate'][:]
-            self.sedAges = f['ages'][:]
             self.sedMetallicity = f['metallicity'][:]
             self.sedWavelength = f['wavelength'][:]
+            
+            # Detect SED template format
+            if 'ages' in f:
+                # Lightcone format: stellar ages (lookback times)
+                self.sedAges = f['ages'][:]
+                self.sedTemplateFormat = 'lightcone'
+            elif 'time' in f:
+                # Fixed-time format: cosmic times
+                self.sedTime = f['time'][:]
+                self.sedTemplateFormat = 'fixed-time'
+                # For backward compatibility, also store as sedAges
+                # (will be converted to lookback times when used with galaxy data)
+                self.sedAges = self.sedTime.copy()
+            else:
+                raise ValueError("SED template must contain either 'ages' (lightcone) or 'time' (fixed-time) dataset")
     
     def get_sed_template_parameters(self):
         """
         Extract the star formation history parameters from the SED template.
         
-        The SED template stores bin maximum values in sedAges and sedMetallicity.
-        This function reconstructs the parameters that would have been used to 
-        generate these bins according to the Galacticus starFormationHistoryFixedAges
-        class specification.
+        The SED template stores bin maximum values in sedAges (for lightcone) or 
+        sedTime (for fixed-time). This function reconstructs the parameters that 
+        would have been used to generate these bins.
+        
+        For lightcone templates: sedAges contains lookback times in descending order
+        For fixed-time templates: sedTime contains cosmic times in ascending order
         
         Returns
         -------
         dict
             Dictionary containing:
-            - ageMinimum: minimum age bin boundary (Gyr)
-            - ageMaximum: maximum age bin boundary (Gyr), typically age of universe
-            - countAges: number of age bins (excluding the zero-age bin)
+            - ageMinimum: minimum age/time bin boundary (Gyr)
+            - ageMaximum: maximum age/time bin boundary (Gyr)
+            - countAges: number of age/time bins (excluding the zero-age bin)
             - metallicityMinimum: minimum metallicity bin boundary (Solar units)
             - metallicityMaximum: maximum metallicity bin boundary (Solar units)
             - countMetallicities: number of metallicity bins (excluding the infinity bin)
+            - sedTemplateFormat: 'lightcone' or 'fixed-time'
         """
-        # Ages are stored in descending order (lookback time)
-        # The last non-zero age is the minimum
-        # The first age is the maximum (age of universe)
-        # There's always an additional bin at age=0
-        
-        # Find the index of the zero-age bin
-        zero_age_idx = np.where(self.sedAges < 1e-10)[0]
-        if len(zero_age_idx) > 0:
-            # Exclude the zero-age bin from the count
-            non_zero_ages = self.sedAges[:zero_age_idx[0]]
-            countAges = len(non_zero_ages)
-            ageMaximum = non_zero_ages[0]
-            ageMinimum = non_zero_ages[-1]
-        else:
-            # No explicit zero bin, but there should be
-            countAges = len(self.sedAges) - 1
-            ageMaximum = self.sedAges[0]
-            ageMinimum = self.sedAges[-1]
+        # Handle both lightcone (ages in descending order) and fixed-time (time in ascending order)
+        if self.sedTemplateFormat == 'lightcone':
+            # Ages are stored in descending order (lookback time)
+            # The last non-zero age is the minimum
+            # The first age is the maximum (age of universe)
+            # There's always an additional bin at age=0
+            
+            # Find the index of the zero-age bin
+            zero_age_idx = np.where(self.sedAges < 1e-10)[0]
+            if len(zero_age_idx) > 0:
+                # Exclude the zero-age bin from the count
+                non_zero_ages = self.sedAges[:zero_age_idx[0]]
+                countAges = len(non_zero_ages)
+                ageMaximum = non_zero_ages[0]
+                ageMinimum = non_zero_ages[-1]
+            else:
+                # No explicit zero bin, but there should be
+                countAges = len(self.sedAges) - 1
+                ageMaximum = self.sedAges[0]
+                ageMinimum = self.sedAges[-1]
+        else:  # fixed-time
+            # Times are in ascending order (cosmic time)
+            # For fixed-time: times are bin MAXIMA, starting from the first bin
+            # The minimum is implicitly t=0 (not stored in the array)
+            # So if we have N time values, we have N bins:
+            #   Bin 0: [0, sedTime[0]]
+            #   Bin 1: [sedTime[0], sedTime[1]]
+            #   ...
+            #   Bin N-1: [sedTime[N-2], sedTime[N-1]]
+            if len(self.sedTime) > 0:
+                countAges = len(self.sedTime)  # Number of bins = number of time values
+                ageMinimum = 0.0  # Implicit minimum (t=0, not stored)
+                ageMaximum = self.sedTime[-1]  # Actually outputTime
+            else:
+                raise ValueError("SED template has no time bins")
         
         # Metallicity: bins are logarithmically spaced
         # The first bin starts at the first value (which represents the max of the first bin)
@@ -210,7 +372,8 @@ class sed_calculator:
             'countAges': countAges,
             'metallicityMinimum': metallicityMinimum,
             'metallicityMaximum': metallicityMaximum,
-            'countMetallicities': countMetallicities
+            'countMetallicities': countMetallicities,
+            'sedTemplateFormat': self.sedTemplateFormat
         }
     
     def validate_sfh_compatibility(self, filename):
@@ -240,19 +403,76 @@ class sed_calculator:
         # Get parameters from SED template
         sed_params = self.get_sed_template_parameters()
         
+        # Detect galaxy file format
+        galaxy_format, base_path = detect_galacticus_format(filename)
+        
+        # OPTION 1: Strict format matching
+        # SED template format must match galaxy file format
+        if sed_params.get('sedTemplateFormat') != galaxy_format:
+            raise ValueError(
+                f"SED template format ('{sed_params.get('sedTemplateFormat')}') does not match "
+                f"galaxy file format ('{galaxy_format}'). Lightcone SED templates can only be used "
+                f"with lightcone galaxy data, and fixed-time SED templates can only be used with "
+                f"fixed-time galaxy data, because the time binning algorithms are different."
+            )
+        
         # Read parameters from Galacticus file
         with h5py.File(filename, 'r') as f:
             if '/Parameters/starFormationHistory' not in f:
                 raise ValueError("No starFormationHistory parameters found in Galacticus file")
             
             sfh_group = f['/Parameters/starFormationHistory']
-            sfh_params = {
-                'ageMinimum': sfh_group.attrs['ageMinimum'],
-                'countAges': sfh_group.attrs['countAges'],
-                'metallicityMinimum': sfh_group.attrs['metallicityMinimum'],
-                'metallicityMaximum': sfh_group.attrs['metallicityMaximum'],
-                'countMetallicities': sfh_group.attrs['countMetallicities']
-            }
+            if galaxy_format == 'lightcone':
+                sfh_params = {
+                    'ageMinimum': sfh_group.attrs['ageMinimum'],
+                    'countAges': sfh_group.attrs['countAges'],
+                    'metallicityMinimum': sfh_group.attrs['metallicityMinimum'],
+                    'metallicityMaximum': sfh_group.attrs['metallicityMaximum'],
+                    'countMetallicities': sfh_group.attrs['countMetallicities']
+                }
+            else:  # fixed-time
+                sfh_params = {
+                    'ageMinimum': sfh_group.attrs['timeStepMinimum'],
+                    'countAges': sfh_group.attrs['countTimeStepsMaximum'],
+                    'metallicityMinimum': sfh_group.attrs['metallicityMinimum'],
+                    'metallicityMaximum': sfh_group.attrs['metallicityMaximum'],
+                    'countMetallicities': sfh_group.attrs['countMetallicities']
+                }
+                
+                # OPTION 2: For fixed-time, validate that time arrays match
+                # Get time array from galaxy file (from SFH dataset attribute)
+                node_data_path = f"{base_path}/nodeData"
+                if node_data_path in f:
+                    disk_sfh_path = f"{node_data_path}/diskStarFormationHistoryMass"
+                    if disk_sfh_path in f and 'time' in f[disk_sfh_path].attrs:
+                        galaxy_times = f[disk_sfh_path].attrs['time']
+                        
+                        # Compare with SED template times
+                        if hasattr(self, 'sedTime'):
+                            if len(galaxy_times) != len(self.sedTime):
+                                raise ValueError(
+                                    f"Fixed-time: time array length mismatch. "
+                                    f"Galaxy file has {len(galaxy_times)} time bins, "
+                                    f"SED template has {len(self.sedTime)} time bins."
+                                )
+                            
+                            # Check that time values match (within tolerance)
+                            time_tol = 1e-5  # Relative tolerance for time comparison
+                            if not np.allclose(galaxy_times, self.sedTime, rtol=time_tol):
+                                max_diff = np.max(np.abs(galaxy_times - self.sedTime))
+                                # Avoid divide by zero - use absolute comparison for small values
+                                nonzero_mask = np.abs(self.sedTime) > 1e-10
+                                if np.any(nonzero_mask):
+                                    max_rel_diff = np.max(np.abs((galaxy_times[nonzero_mask] - self.sedTime[nonzero_mask]) / self.sedTime[nonzero_mask]))
+                                else:
+                                    max_rel_diff = 0.0
+                                raise ValueError(
+                                    f"Fixed-time: time arrays do not match. "
+                                    f"Max absolute difference: {max_diff:.6e} Gyr, "
+                                    f"Max relative difference: {max_rel_diff:.6e}. "
+                                    f"The SED template and galaxy file must have been generated "
+                                    f"with the same Galacticus time binning parameters."
+                                )
         
         # Compare parameters
         errors = []
@@ -267,8 +487,13 @@ class sed_calculator:
         # Check boundaries with some tolerance for floating point comparison
         rel_tol = 1e-6
         
-        if not np.isclose(sfh_params['ageMinimum'], sed_params['ageMinimum'], rtol=rel_tol):
-            errors.append(f"ageMinimum mismatch: SFH={sfh_params['ageMinimum']}, SED template={sed_params['ageMinimum']}")
+        # For lightcone format, validate ageMinimum
+        # For fixed-time format, ageMinimum is actually timeStepMinimum (minimum bin width)
+        # which doesn't directly appear in the SED template, but we've already validated
+        # the time arrays match above for fixed-time
+        if galaxy_format == 'lightcone':
+            if not np.isclose(sfh_params['ageMinimum'], sed_params['ageMinimum'], rtol=rel_tol):
+                errors.append(f"ageMinimum mismatch: SFH={sfh_params['ageMinimum']}, SED template={sed_params['ageMinimum']}")
         
         if not np.isclose(sfh_params['metallicityMinimum'], sed_params['metallicityMinimum'], rtol=rel_tol):
             errors.append(f"metallicityMinimum mismatch: SFH={sfh_params['metallicityMinimum']}, SED template={sed_params['metallicityMinimum']}")
@@ -311,15 +536,96 @@ class sed_calculator:
         return observed_Fnu*u.Lsun/(u.Hz * u.Mpc**2), wavelengths
     
     def read_galacticus_galaxy(self, filename, galIndex):
-        # read a Galacticus catalog file (hdf5) and get properties of one galaxy
+        """
+        Read a Galacticus catalog file (HDF5) and get properties of one galaxy.
+        
+        This method automatically detects the file format (lightcone vs fixed-time)
+        and reads the appropriate data structure.
+        
+        Parameters
+        ----------
+        filename : str
+            Path to Galacticus HDF5 file
+        galIndex : int
+            Index of the galaxy to read
+            
+        Returns
+        -------
+        galData : dict
+            Dictionary containing galaxy properties:
+            - redshift: Galaxy redshift
+            - diskSFH: Star formation history for disk (2D array: metallicity x time)
+            - diskSFH_times: Time bins for disk SFH (lookback times in Gyr)
+            - spheroidSFH: Star formation history for spheroid
+            - spheroidSFH_times: Time bins for spheroid SFH (lookback times in Gyr)
+        """
+        # Detect format if not already cached
+        if filename not in self._file_formats:
+            format_type, base_path = detect_galacticus_format(filename)
+            self._file_formats[filename] = (format_type, base_path)
+        else:
+            format_type, base_path = self._file_formats[filename]
+        
+        # Get format-specific config
+        config = self._get_config_for_format(format_type, base_path)
+        
         with h5py.File(filename, 'r') as f:
-            self.galData = {
-                'redshift': f[self.config['redshift']][galIndex],
-                'diskSFH': np.array([list(x) for x in f[self.config['diskSFH']][galIndex]], dtype=float),
-                'diskSFH_times': f[self.config['diskSFH_times']][galIndex],
-                'spheroidSFH': np.array([list(x) for x in f[self.config['spheroidSFH']][galIndex]], dtype=float),
-                'spheroidSFH_times': f[self.config['spheroidSFH_times']][galIndex],
-            }
+            if format_type == 'lightcone':
+                # Lightcone format: per-galaxy redshift and times
+                self.galData = {
+                    'redshift': f[config['redshift']][galIndex],
+                    'diskSFH': np.array([list(x) for x in f[config['diskSFH']][galIndex]], dtype=float),
+                    'diskSFH_times': f[config['diskSFH_times']][galIndex],
+                    'spheroidSFH': np.array([list(x) for x in f[config['spheroidSFH']][galIndex]], dtype=float),
+                    'spheroidSFH_times': f[config['spheroidSFH_times']][galIndex],
+                }
+            
+            elif format_type == 'fixed-time':
+                # Fixed-time format: single output time, times from attributes
+                output_group = f[base_path]
+                outputTime = output_group.attrs['outputTime']
+                
+                # Convert outputTime to redshift
+                redshift = outputTime_to_redshift(outputTime, self.cosmo)
+                
+                # Read SFH datasets
+                diskSFH_dataset = f[config['diskSFH']]
+                spheroidSFH_dataset = f[config['spheroidSFH']]
+                
+                # Get time and metallicity bins from dataset attributes
+                # Times are age-of-universe bin edges
+                disk_times_age_of_universe = diskSFH_dataset.attrs['time']
+                spheroid_times_age_of_universe = spheroidSFH_dataset.attrs['time']
+                
+                # Convert to lookback times (stellar ages)
+                # Note: SFH bins represent [time[i-1], time[i]), so we take bin centers
+                # Actually, the documentation says times are the maximum time for each bin
+                # So we convert directly
+                disk_times_lookback = age_of_universe_to_lookback_time(
+                    disk_times_age_of_universe, outputTime
+                )
+                spheroid_times_lookback = age_of_universe_to_lookback_time(
+                    spheroid_times_age_of_universe, outputTime
+                )
+                
+                # Read SFH data for this galaxy
+                # Note: Data is stored as [metallicity x time] just like lightcone
+                diskSFH = np.array([list(x) for x in diskSFH_dataset[galIndex]], dtype=float)
+                spheroidSFH = np.array([list(x) for x in spheroidSFH_dataset[galIndex]], dtype=float)
+                
+                self.galData = {
+                    'redshift': redshift,
+                    'diskSFH': diskSFH,
+                    'diskSFH_times': disk_times_lookback,
+                    'spheroidSFH': spheroidSFH,
+                    'spheroidSFH_times': spheroid_times_lookback,
+                    'format_type': format_type,
+                    'outputTime': outputTime,
+                }
+            
+            else:
+                raise ValueError(f"Unknown format type: {format_type}")
+        
         return self.galData
 
     def calculate_sed_for_galacticus_galaxy(self, filename, galIndex, wavelengths):
