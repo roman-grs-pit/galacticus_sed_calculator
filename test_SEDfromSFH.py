@@ -620,6 +620,13 @@ class TestSEDTemplateFormats(unittest.TestCase):
             self.assertEqual(params['sedTemplateFormat'], 'fixed-time')
             self.assertGreater(params['countAges'], 0)
             
+            # For fixed-time format: countAges should equal len(sedTime)
+            # (because t=0 edge is implicit, not stored)
+            self.assertEqual(params['countAges'], len(calc.sedTime))
+            
+            # ageMinimum should be 0 (implicit lower bound)
+            self.assertEqual(params['ageMinimum'], 0.0)
+            
         finally:
             if os.path.exists(tmp_filename):
                 os.unlink(tmp_filename)

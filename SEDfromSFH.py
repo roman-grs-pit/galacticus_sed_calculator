@@ -329,11 +329,16 @@ class sed_calculator:
                 ageMinimum = self.sedAges[-1]
         else:  # fixed-time
             # Times are in ascending order (cosmic time)
-            # For fixed-time, we use timeStepMinimum instead of ageMinimum
-            # The first time is the minimum, last is the maximum (output time)
+            # For fixed-time: times are bin MAXIMA, starting from the first bin
+            # The minimum is implicitly t=0 (not stored in the array)
+            # So if we have N time values, we have N bins:
+            #   Bin 0: [0, sedTime[0]]
+            #   Bin 1: [sedTime[0], sedTime[1]]
+            #   ...
+            #   Bin N-1: [sedTime[N-2], sedTime[N-1]]
             if len(self.sedTime) > 0:
-                countAges = len(self.sedTime) - 1  # One less than number of bin edges
-                ageMinimum = self.sedTime[0]  # Actually timeStepMinimum
+                countAges = len(self.sedTime)  # Number of bins = number of time values
+                ageMinimum = 0.0  # Implicit minimum (t=0, not stored)
                 ageMaximum = self.sedTime[-1]  # Actually outputTime
             else:
                 raise ValueError("SED template has no time bins")
@@ -434,8 +439,14 @@ class sed_calculator:
         # Check boundaries with some tolerance for floating point comparison
         rel_tol = 1e-6
         
-        if not np.isclose(sfh_params['ageMinimum'], sed_params['ageMinimum'], rtol=rel_tol):
-            errors.append(f"ageMinimum mismatch: SFH={sfh_params['ageMinimum']}, SED template={sed_params['ageMinimum']}")
+        # For lightcone format, ageMinimum is the minimum stellar age
+        # For fixed-time format, it's timeStepMinimum (minimum bin width), which doesn't
+        # directly correspond to anything in the SED template, so we skip this check
+        # The SED template's actual time bins are determined by the Galacticus algorithm
+        # and we validate compatibility through countAges instead
+        if sed_params.get('sedTemplateFormat') == 'lightcone':
+            if not np.isclose(sfh_params['ageMinimum'], sed_params['ageMinimum'], rtol=rel_tol):
+                errors.append(f"ageMinimum mismatch: SFH={sfh_params['ageMinimum']}, SED template={sed_params['ageMinimum']}")
         
         if not np.isclose(sfh_params['metallicityMinimum'], sed_params['metallicityMinimum'], rtol=rel_tol):
             errors.append(f"metallicityMinimum mismatch: SFH={sfh_params['metallicityMinimum']}, SED template={sed_params['metallicityMinimum']}")
