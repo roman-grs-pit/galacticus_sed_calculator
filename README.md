@@ -9,6 +9,7 @@ Classes and methods to generate spectra for galaxies simulated with Galacticus, 
 - **Magnitude calculation**: Calculate observed magnitudes in arbitrary bandpasses
 - **Coordinate transformation**: Convert lightcone angular positions to RA/Dec with field repositioning
 - **Cross-validation**: Compare results from different Galacticus output formats
+- **Performance profiling**: Tools to analyze and optimize SED generation performance
 
 ## Supported Galacticus Output Formats
 
@@ -121,6 +122,24 @@ Run tests with unittest:
 python -m unittest test_SEDfromSFH
 python -m unittest test_coordinates
 ```
+
+## Performance Profiling
+
+The repository includes comprehensive profiling tools to analyze SED generation performance. See [PROFILING.md](PROFILING.md) for detailed documentation.
+
+Quick start:
+```bash
+# Profile 100 galaxies
+python profile_sed_generation.py --num-galaxies 100
+
+# Analyze component-level performance
+python profile_sed_generation.py --component-profile --galaxy-index 8
+
+# Detailed function-level profiling
+python profile_sed_generation.py --num-galaxies 50 --detailed-profile --output-file results.txt
+```
+
+Current performance: ~130 ms per galaxy (faster than 0.2 s/galaxy target).
 
 ## Implementation Details
 
