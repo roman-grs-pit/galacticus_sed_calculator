@@ -772,12 +772,12 @@ class sed_calculator:
         component_spectrum = total_flux
         return component_spectrum
     
-    def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA):
+    def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA, include_emission_lines=True):
         components=['disk','spheroid']
         if includeAGN:
             components.append('AGN')    
         for i,component in enumerate(components):
-            spectrum = self.evaluate_component_spectrum(filename, galIndex, component=component, obs_wavelengths=obs_wavelengths, lineFWHM=lineFWHM)
+            spectrum = self.evaluate_component_spectrum(filename, galIndex, component=component, obs_wavelengths=obs_wavelengths, lineFWHM=lineFWHM, include_emission_lines=include_emission_lines)
             if i==0:
                 total_spectrum = spectrum
             else:
