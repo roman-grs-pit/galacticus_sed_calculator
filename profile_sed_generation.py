@@ -27,7 +27,8 @@ def profile_sed_generation(
     num_galaxies=None,
     obs_wavelengths=None,
     detailed_profile=False,
-    output_file=None
+    output_file=None,
+    include_emission_lines=True
 ):
     """
     Profile SED generation for multiple galaxies.
@@ -120,7 +121,8 @@ def profile_sed_generation(
             total_flux = sedCalc.evaluate_total_spectrum(
                 galacticus_filename, 
                 galIndex, 
-                obs_wavelengths=obs_wavelengths
+                obs_wavelengths=obs_wavelengths,
+                include_emission_lines=include_emission_lines
             )
             success = True
         except Exception as e:
@@ -303,6 +305,17 @@ def profile_sed_components(
     component_times['disk_emission_lines_only'] = (
         component_times['disk_with_lines'] - component_times['disk_continuum']
     )
+
+    # Time: Calculate AGN (which is only emission lines for now)
+    t0 = time.time()
+    AGN_spectrum = sedCalc.evaluate_component_spectrum(
+        galacticus_filename, galIndex, 
+        component='AGN',
+        obs_wavelengths=obs_wavelengths,
+        include_emission_lines=True
+    )
+    component_times['AGN_with_lines'] = time.time() - t0
+    print(f"AGN with emission lines: {component_times['AGN_with_lines']:.4f} s")
     
     # Time: Full spectrum (disk + spheroid + AGN with lines)
     t0 = time.time()
@@ -410,6 +423,12 @@ Examples:
         default=1000,
         help='Number of wavelength points (default: 1000)'
     )
+
+    parser.add_argument(
+        '--no-emission-lines',
+        action='store_true',
+        help='Disable emission line calculation'
+    )
     
     args = parser.parse_args()
     
@@ -436,7 +455,8 @@ Examples:
             num_galaxies=args.num_galaxies,
             obs_wavelengths=obs_wavelengths,
             detailed_profile=args.detailed_profile,
-            output_file=args.output_file
+            output_file=args.output_file,
+            include_emission_lines=not args.no_emission_lines
         )
 
 
