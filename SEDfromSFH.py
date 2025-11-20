@@ -1,6 +1,7 @@
 import numpy as np
 import h5py 
 import astropy.units as u
+import astropy.constants as const
 from astropy.cosmology import Planck15 
 import re
 import synphot
@@ -845,7 +846,7 @@ class sed_calculator:
                                                 lookup_table=np.zeros(len(obs_wavelengths)))
                 else:
                     continuum_wav = process_wavelength_array(obs_wavelengths)
-                    continuum_Fnu = np.zeros(len(continuum_wav)) * u.Lsun / (u.Hz * u.Mpc**2)
+                    continuum_Fnu = np.zeros(len(continuum_wav)) * u.erg / (u.s * u.Hz * u.cm**2)
             else:
                 Fnu, wav = self.calculate_continuum_Fnu(SFH, redshift, obs_wavelengths, extrapolateWithZeros=True)
                 if use_synphot:
@@ -862,7 +863,7 @@ class sed_calculator:
                 continuum_flux = SourceSpectrum(Empirical1D, points=obs_wavelengths, lookup_table=np.zeros(len(obs_wavelengths)))
             else:
                 continuum_wav = process_wavelength_array(obs_wavelengths)
-                continuum_Fnu = np.zeros(len(continuum_wav)) * u.Lsun / (u.Hz * u.Mpc**2)
+                continuum_Fnu = np.zeros(len(continuum_wav)) * u.erg / (u.s * u.Hz * u.cm**2)
 
         # now loop over the emission lines adding them to the continuum
         if use_synphot:
@@ -881,7 +882,6 @@ class sed_calculator:
                 lineFlux = lineLuminosity * (u.erg/u.s) / (4 * np.pi * (self.cosmo.luminosity_distance(redshift).to(u.cm))**2)
                 if lineFlux <= minimumLineFlux:
                     continue
-
                 if use_synphot:
                     line_flux = SourceSpectrum(GaussianFlux1D, total_flux=lineFlux, mean=lineWavelength, fwhm=lineFWHM)
                     total_flux += line_flux
@@ -891,11 +891,8 @@ class sed_calculator:
                     line_flux_per_AA = gaussian_from_fwhm(continuum_wav, lineWavelength, lineFWHM, lineFlux)
                     # Convert from F_lambda (erg/(s cm^2 AA)) to F_nu (erg/(s cm^2 Hz))
                     # F_nu = F_lambda * lambda^2 / c
-                    c_AA_per_s = (3e10 * u.cm / u.s).to(u.AA / u.s)  # speed of light in AA/s
-                    line_Fnu_erg = line_flux_per_AA * continuum_wav**2 / c_AA_per_s
-                    # Convert from erg/(s cm^2 Hz) to Lsun/(Hz Mpc^2)
-                    line_Fnu = line_Fnu_erg.to(u.Lsun / (u.Hz * u.Mpc**2))
-                    total_Fnu += line_Fnu
+                    line_Fnu = line_flux_per_AA * continuum_wav**2 / const.c
+                    total_Fnu += line_Fnu.to('erg/(s cm^2 Hz)')
         
         if use_synphot:
             component_spectrum = total_flux
