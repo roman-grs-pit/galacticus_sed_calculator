@@ -14,7 +14,7 @@ class TestSEDTemplateParameterExtraction(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.sed_template_file = 'data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5'
+        self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.galacticus_file = 'data/romanUNIT.hdf5'
         self.calc = sed_calculator(self.sed_template_file)
     
@@ -57,7 +57,7 @@ class TestSFHCompatibilityValidation(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.sed_template_file = 'data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5'
+        self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.galacticus_file = 'data/romanUNIT.hdf5'
         self.calc = sed_calculator(self.sed_template_file)
     
@@ -166,7 +166,7 @@ class TestIntegrationWithEvaluateComponentSpectrum(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.sed_template_file = 'data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5'
+        self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.galacticus_file = 'data/romanUNIT.hdf5'
         self.calc = sed_calculator(self.sed_template_file)
     
@@ -211,7 +211,7 @@ class TestCalculateMagnitudes(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.sed_template_file = 'data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5'
+        self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.galacticus_file = 'data/romanUNIT.hdf5'
         self.calc = sed_calculator(self.sed_template_file)
     
@@ -882,6 +882,220 @@ class TestFormatValidation(unittest.TestCase):
                 os.unlink(tmp_sed_filename)
             if os.path.exists(tmp_gal_filename):
                 os.unlink(tmp_gal_filename)
+
+
+class TestFastSEDGeneration(unittest.TestCase):
+    """Test the fast SED generation without synphot."""
+    
+    def setUp(self):
+        """Set up test fixtures."""
+        self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
+        self.galacticus_file = 'data/romanUNIT.hdf5'
+        self.calc = sed_calculator(self.sed_template_file)
+    
+    def test_use_synphot_parameter_exists(self):
+        """Test that use_synphot parameter is accepted."""
+        # Should work with use_synphot=True (default)
+        import astropy.units as u
+        wavelengths = np.linspace(10000, 20000, 100) * u.AA
+        spectrum = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=wavelengths,
+            use_synphot=True
+        )
+        self.assertIsNotNone(spectrum)
+    
+    def test_use_synphot_false_returns_tuple(self):
+        """Test that use_synphot=False returns a tuple."""
+        import astropy.units as u
+        wavelengths = np.linspace(10000, 20000, 100) * u.AA
+        result = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=wavelengths,
+            use_synphot=False
+        )
+        # Should return a tuple
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        
+        # Check that both elements are quantities with proper units
+        wav, flux = result
+        self.assertIsInstance(wav, u.Quantity)
+        self.assertIsInstance(flux, u.Quantity)
+    
+    def test_use_synphot_false_requires_wavelengths(self):
+        """Test that use_synphot=False requires obs_wavelengths."""
+        with self.assertRaises(ValueError) as context:
+            self.calc.evaluate_component_spectrum(
+                self.galacticus_file,
+                galIndex=0,
+                component='disk',
+                obs_wavelengths=None,
+                use_synphot=False
+            )
+        self.assertIn('obs_wavelengths must be provided', str(context.exception))
+    
+    def test_synphot_and_fast_paths_produce_similar_results(self):
+        """Test that synphot and fast paths produce similar continuum results."""
+        import astropy.units as u
+        
+        # Use a fine wavelength grid to resolve any differences
+        wavelengths = np.linspace(10000, 20000, 500) * u.AA
+        
+        # Get spectrum with synphot
+        spectrum_synphot = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=wavelengths,
+            include_emission_lines=False,  # Test continuum only first
+            use_synphot=True
+        )
+        
+        # Get spectrum with fast path
+        wav_fast, flux_fast = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=wavelengths,
+            include_emission_lines=False,  # Test continuum only first
+            use_synphot=False
+        )
+        
+        # Evaluate synphot spectrum at the same wavelengths
+        flux_synphot = spectrum_synphot(wavelengths, flux_unit='FNU')
+        
+        # Convert to same units for comparison
+        flux_synphot_val = flux_synphot.to_value(u.Lsun / (u.Hz * u.Mpc**2))
+        flux_fast_val = flux_fast.to_value(u.Lsun / (u.Hz * u.Mpc**2))
+        
+        # Should be very similar (within numerical precision)
+        np.testing.assert_allclose(flux_fast_val, flux_synphot_val, rtol=1e-5)
+    
+    def test_fast_path_with_emission_lines(self):
+        """Test that fast path works with emission lines."""
+        import astropy.units as u
+        
+        # Use a fine wavelength grid to resolve emission lines
+        wavelengths = np.linspace(8000, 30000, 2000) * u.AA
+        
+        # Get spectrum with emission lines
+        wav_fast, flux_fast = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=wavelengths,
+            include_emission_lines=True,
+            use_synphot=False
+        )
+        
+        # Check that we got results
+        self.assertEqual(len(wav_fast), len(wavelengths))
+        self.assertEqual(len(flux_fast), len(wavelengths))
+        
+        # Flux should be non-negative
+        self.assertTrue(np.all(flux_fast.value >= 0))
+    
+    def test_gaussian_helper_functions(self):
+        """Test the Gaussian emission line helper functions."""
+        from SEDfromSFH import gaussian_emission_line, gaussian_from_fwhm
+        import astropy.units as u
+        
+        # Test parameters
+        wavelengths = np.linspace(10000, 11000, 1000) * u.AA
+        lambda0 = 10500 * u.AA
+        fwhm = 10 * u.AA
+        total_flux = 1e-16 * u.erg / (u.s * u.cm**2)
+        
+        # Test gaussian_from_fwhm
+        line_flux = gaussian_from_fwhm(wavelengths, lambda0, fwhm, total_flux)
+        
+        # Check units
+        self.assertEqual(line_flux.unit, u.erg / (u.s * u.cm**2 * u.AA))
+        
+        # Check that line is centered at lambda0
+        center_idx = np.argmax(line_flux.value)
+        self.assertAlmostEqual(wavelengths[center_idx].value, lambda0.value, delta=1.0)
+        
+        # Check that integrated flux is approximately correct
+        # Integrate using trapezoid rule
+        integrated_flux = np.trapezoid(line_flux.value, wavelengths.value) * (u.erg / (u.s * u.cm**2))
+        expected_flux = total_flux.to(u.erg / (u.s * u.cm**2))
+        
+        # Should be within 1% (numerical integration error)
+        self.assertAlmostEqual(
+            integrated_flux.value / expected_flux.value, 
+            1.0, 
+            delta=0.01
+        )
+    
+    def test_line_metadata_caching(self):
+        """Test that emission line metadata is properly cached."""
+        import astropy.units as u
+        
+        wavelengths = np.linspace(10000, 20000, 100) * u.AA
+        
+        # First call should populate cache
+        self.assertNotIn((self.galacticus_file, 'disk'), self.calc._line_metadata_cache)
+        
+        wav1, flux1 = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=wavelengths,
+            include_emission_lines=True,
+            use_synphot=False
+        )
+        
+        # Cache should now be populated
+        self.assertIn((self.galacticus_file, 'disk'), self.calc._line_metadata_cache)
+        
+        # Get cached data
+        lineNames, lineWavelengths, hdf5_paths = self.calc._line_metadata_cache[(self.galacticus_file, 'disk')]
+        
+        # Verify cache contents are arrays
+        self.assertIsInstance(lineNames, np.ndarray)
+        self.assertIsInstance(lineWavelengths, np.ndarray)
+        self.assertIsInstance(hdf5_paths, np.ndarray)
+        self.assertEqual(len(lineNames), len(lineWavelengths))
+        self.assertEqual(len(lineNames), len(hdf5_paths))
+        
+        # Second call should reuse cache (same object reference)
+        cached_data = self.calc._line_metadata_cache[(self.galacticus_file, 'disk')]
+        
+        wav2, flux2 = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=1,
+            component='disk',
+            obs_wavelengths=wavelengths,
+            include_emission_lines=True,
+            use_synphot=False
+        )
+        
+        # Cache should still contain same object
+        self.assertIs(self.calc._line_metadata_cache[(self.galacticus_file, 'disk')], cached_data)
+    
+    def test_fast_path_backward_compatibility(self):
+        """Test that default behavior (use_synphot=True) is unchanged."""
+        import astropy.units as u
+        
+        wavelengths = np.linspace(10000, 20000, 100) * u.AA
+        
+        # Call without specifying use_synphot (should default to True)
+        spectrum = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=wavelengths
+        )
+        
+        # Should return a SourceSpectrum object
+        from synphot import SourceSpectrum
+        self.assertIsInstance(spectrum, SourceSpectrum)
 
 
 if __name__ == '__main__':

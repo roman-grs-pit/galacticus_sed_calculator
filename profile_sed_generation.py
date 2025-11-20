@@ -28,7 +28,8 @@ def profile_sed_generation(
     obs_wavelengths=None,
     detailed_profile=False,
     output_file=None,
-    include_emission_lines=True
+    include_emission_lines=True,
+    use_synphot=True
 ):
     """
     Profile SED generation for multiple galaxies.
@@ -122,7 +123,8 @@ def profile_sed_generation(
                 galacticus_filename, 
                 galIndex, 
                 obs_wavelengths=obs_wavelengths,
-                include_emission_lines=include_emission_lines
+                include_emission_lines=include_emission_lines,
+                use_synphot=use_synphot
             )
             success = True
         except Exception as e:
@@ -220,7 +222,8 @@ def profile_sed_components(
     sed_template_filename,
     galacticus_filename,
     galIndex=0,
-    obs_wavelengths=None
+    obs_wavelengths=None,
+    use_synphot=True
 ):
     """
     Profile individual components of SED generation for a single galaxy.
@@ -276,7 +279,8 @@ def profile_sed_components(
         galacticus_filename, galIndex, 
         component='disk',
         obs_wavelengths=obs_wavelengths,
-        include_emission_lines=False
+        include_emission_lines=False,
+        use_synphot=use_synphot
     )
     component_times['disk_continuum'] = time.time() - t0
     print(f"Disk continuum: {component_times['disk_continuum']:.4f} s")
@@ -287,7 +291,8 @@ def profile_sed_components(
         galacticus_filename, galIndex, 
         component='spheroid',
         obs_wavelengths=obs_wavelengths,
-        include_emission_lines=False
+        include_emission_lines=False,
+        use_synphot=use_synphot
     )
     component_times['spheroid_continuum'] = time.time() - t0
     print(f"Spheroid continuum: {component_times['spheroid_continuum']:.4f} s")
@@ -298,7 +303,8 @@ def profile_sed_components(
         galacticus_filename, galIndex, 
         component='disk',
         obs_wavelengths=obs_wavelengths,
-        include_emission_lines=True
+        include_emission_lines=True,
+        use_synphot=use_synphot
     )
     component_times['disk_with_lines'] = time.time() - t0
     print(f"Disk with emission lines: {component_times['disk_with_lines']:.4f} s")
@@ -312,7 +318,8 @@ def profile_sed_components(
         galacticus_filename, galIndex, 
         component='AGN',
         obs_wavelengths=obs_wavelengths,
-        include_emission_lines=True
+        include_emission_lines=True,
+        use_synphot=use_synphot
     )
     component_times['AGN_with_lines'] = time.time() - t0
     print(f"AGN with emission lines: {component_times['AGN_with_lines']:.4f} s")
@@ -321,7 +328,8 @@ def profile_sed_components(
     t0 = time.time()
     total_spectrum = sedCalc.evaluate_total_spectrum(
         galacticus_filename, galIndex, 
-        obs_wavelengths=obs_wavelengths
+        obs_wavelengths=obs_wavelengths,
+        use_synphot=use_synphot
     )
     component_times['total_spectrum'] = time.time() - t0
     print(f"Total spectrum (all components): {component_times['total_spectrum']:.4f} s")
@@ -429,6 +437,12 @@ Examples:
         action='store_true',
         help='Disable emission line calculation'
     )
+
+    parser.add_argument(
+        '--no-synphot',
+        action='store_true',
+        help='Use numpy arrays rather than synphot objects to store spectra'
+    )
     
     args = parser.parse_args()
     
@@ -445,7 +459,8 @@ Examples:
             args.sed_template,
             args.galaxy_catalog,
             galIndex=args.galaxy_index,
-            obs_wavelengths=obs_wavelengths
+            obs_wavelengths=obs_wavelengths,
+            use_synphot=not args.no_synphot
         )
     else:
         # Profile multiple galaxies
@@ -456,7 +471,8 @@ Examples:
             obs_wavelengths=obs_wavelengths,
             detailed_profile=args.detailed_profile,
             output_file=args.output_file,
-            include_emission_lines=not args.no_emission_lines
+            include_emission_lines=not args.no_emission_lines,
+            use_synphot=not args.no_synphot
         )
 
 
