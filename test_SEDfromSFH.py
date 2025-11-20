@@ -1033,6 +1033,52 @@ class TestFastSEDGeneration(unittest.TestCase):
             delta=0.01
         )
     
+    def test_line_metadata_caching(self):
+        """Test that emission line metadata is properly cached."""
+        import astropy.units as u
+        
+        wavelengths = np.linspace(10000, 20000, 100) * u.AA
+        
+        # First call should populate cache
+        self.assertNotIn((self.galacticus_file, 'disk'), self.calc._line_metadata_cache)
+        
+        wav1, flux1 = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=wavelengths,
+            include_emission_lines=True,
+            use_synphot=False
+        )
+        
+        # Cache should now be populated
+        self.assertIn((self.galacticus_file, 'disk'), self.calc._line_metadata_cache)
+        
+        # Get cached data
+        lineNames, lineWavelengths, hdf5_paths = self.calc._line_metadata_cache[(self.galacticus_file, 'disk')]
+        
+        # Verify cache contents are arrays
+        self.assertIsInstance(lineNames, np.ndarray)
+        self.assertIsInstance(lineWavelengths, np.ndarray)
+        self.assertIsInstance(hdf5_paths, np.ndarray)
+        self.assertEqual(len(lineNames), len(lineWavelengths))
+        self.assertEqual(len(lineNames), len(hdf5_paths))
+        
+        # Second call should reuse cache (same object reference)
+        cached_data = self.calc._line_metadata_cache[(self.galacticus_file, 'disk')]
+        
+        wav2, flux2 = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=1,
+            component='disk',
+            obs_wavelengths=wavelengths,
+            include_emission_lines=True,
+            use_synphot=False
+        )
+        
+        # Cache should still contain same object
+        self.assertIs(self.calc._line_metadata_cache[(self.galacticus_file, 'disk')], cached_data)
+    
     def test_fast_path_backward_compatibility(self):
         """Test that default behavior (use_synphot=True) is unchanged."""
         import astropy.units as u
