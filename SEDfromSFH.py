@@ -208,6 +208,29 @@ def getLineProperties(fname, component='disk', galIndex=None, hdf5_base_path=Non
         lineLuminosities = np.array([get_data(f, hdf5_path, galIndex)  for hdf5_path in hdf5_paths])
     return lineNames, lineWavelengths, lineLuminosities
 
+def minFlux(value):
+    """
+    Accept either a float (assumed to be erg / (s cm^2)),
+    or an astropy Quantity in any valid flux unit.
+    Returns an astropy Quantity in erg/(s cm^2).
+    """
+
+    default_unit = u.erg / (u.s * u.cm**2)
+
+    # Case 1: astropy Quantity
+    if isinstance(value, u.Quantity):
+        try:
+            return value.to(default_unit)
+        except u.UnitConversionError:
+            raise ValueError(f"minFlux: cannot convert unit {value.unit} to erg/(s cm^2)")
+
+    # Case 2: plain number
+    if isinstance(value, (int, float)):
+        return value * default_unit
+
+    # Case 3: unsupported
+    raise TypeError("minFlux requires a number or an astropy Quantity.")
+
 class sed_calculator:
     def __init__(self, sedTemplateFilename, config=galacticus_sed_config, cosmology=Planck15):
         self.sedTemplateFilename = sedTemplateFilename
@@ -638,7 +661,7 @@ class sed_calculator:
         )
         return observed_sed
 
-    def evaluate_component_spectrum(self, filename, galIndex, component='disk', obs_wavelengths=None, include_emission_lines=True, lineFWHM=10*u.AA):
+    def evaluate_component_spectrum(self, filename, galIndex, component='disk', obs_wavelengths=None, include_emission_lines=True, lineFWHM=10*u.AA, minimumLineFlux=0, minimumLineWavelength = 0.9*u.micron, maximumLineWavelength = 2.03*u.micron):
         """
         Evaluate the spectrum of a specified galaxy component and return it as a synphot Spectrum1D object.
 
@@ -667,6 +690,18 @@ class sed_calculator:
             The full width at half maximum (FWHM) of the emission lines, specified as an astropy Quantity
             (or else assumed to be in Angstroms).
             Default is 10 Angstroms.
+        minimumLineFlux : float or Quantity, optional
+            The minimum line flux for an emission line to be included in the spectrum (strictly speaking
+            it is the maximum line flux for an emission line to not be included).
+            Can be supplied as a float (assumed to be in erg / (s cm^2)) or as an astropy Quantity in any valid
+            flux unit.
+            Default is 0 (include all lines with non-zero flux).
+        minimumLineWavelength : Quantity, optional
+            The minimum observed wavelength for an emission line to be included in the spectrum.
+            Default is 0.9 micron.
+        maximumLineWavelength : Quantity, optional
+            The maximum observed wavelength for an emission line to be included in the spectrum.
+            Default is 2.03 micron.
 
         Returns
         -------
@@ -721,21 +756,28 @@ class sed_calculator:
         # now loop over the emission lines adding them to the continuum
         total_flux = continuum_flux
         if include_emission_lines:
+            minimumLineFlux = minFlux(minimumLineFlux)
             lineNames, lineRestWavelengths, lineLuminosities = getLineProperties(filename, component=component, galIndex=galIndex)
             for lineName, lineRestWavelength, lineLuminosity in zip(lineNames, lineRestWavelengths, lineLuminosities):
-                lineFlux = lineLuminosity * (u.erg/u.s) / (4 * np.pi * (self.cosmo.luminosity_distance(redshift).to(u.cm))**2)
                 lineWavelength = (lineRestWavelength * u.AA) * (1 + redshift)
+                if (lineWavelength < minimumLineWavelength) or (lineWavelength > maximumLineWavelength):
+                    continue
+                lineFlux = lineLuminosity * (u.erg/u.s) / (4 * np.pi * (self.cosmo.luminosity_distance(redshift).to(u.cm))**2)
+                if lineFlux <= minimumLineFlux:
+                    continue
+
+
                 line_flux = SourceSpectrum(GaussianFlux1D, total_flux=lineFlux, mean=lineWavelength, fwhm=lineFWHM)
                 total_flux += line_flux
         component_spectrum = total_flux
         return component_spectrum
     
-    def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA):
+    def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA, include_emission_lines=True):
         components=['disk','spheroid']
         if includeAGN:
             components.append('AGN')    
         for i,component in enumerate(components):
-            spectrum = self.evaluate_component_spectrum(filename, galIndex, component=component, obs_wavelengths=obs_wavelengths, lineFWHM=lineFWHM)
+            spectrum = self.evaluate_component_spectrum(filename, galIndex, component=component, obs_wavelengths=obs_wavelengths, lineFWHM=lineFWHM, include_emission_lines=include_emission_lines)
             if i==0:
                 total_spectrum = spectrum
             else:
