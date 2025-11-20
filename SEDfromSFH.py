@@ -326,6 +326,9 @@ class sed_calculator:
         self._validated_files = set()
         # Cache for detected file formats
         self._file_formats = {}
+        # Cache for emission line names and wavelengths (same for all galaxies)
+        # Key: (filename, component), Value: (lineNames, lineWavelengths, hdf5_paths)
+        self._line_metadata_cache = {}
     
     def _get_config_for_format(self, format_type, base_path):
         """
@@ -363,6 +366,56 @@ class sed_calculator:
         # For fixed-time format, redshift and times are handled differently (not in config)
         
         return config
+    
+    def _get_line_metadata(self, filename, component):
+        """
+        Get cached emission line metadata (names, wavelengths, HDF5 paths).
+        
+        This method caches the line names and wavelengths which are the same for all 
+        galaxies in a file, avoiding repeated file reads and string processing.
+        
+        Parameters
+        ----------
+        filename : str
+            Path to Galacticus HDF5 file
+        component : str
+            Component name ('disk', 'spheroid', or 'AGN')
+            
+        Returns
+        -------
+        lineNames : np.ndarray
+            Array of emission line names
+        lineWavelengths : np.ndarray
+            Array of rest-frame wavelengths (Angstroms)
+        hdf5_paths : np.ndarray
+            Array of HDF5 paths to line luminosity datasets
+        """
+        cache_key = (filename, component)
+        
+        # Return cached data if available
+        if cache_key in self._line_metadata_cache:
+            return self._line_metadata_cache[cache_key]
+        
+        # Otherwise, compute and cache
+        # Auto-detect base path
+        format_type, base_path = detect_galacticus_format(filename)
+        hdf5_base_path = f'{base_path}/nodeData/luminosityEmissionLine'
+        
+        with h5py.File(filename, 'r') as f:
+            lineNamesBytes = getLineNames(f, component=component)
+            # Convert to regular strings
+            lineNames = np.char.decode(lineNamesBytes, encoding='utf-8')
+            # Extract the numeric suffix as wavelengths
+            lineWavelengths = np.array([int(re.search(r'\d+$', name).group()) for name in lineNames])
+            # Build HDF5 paths
+            def firstLetterCapitalize(s):
+                return s[0].upper() + s[1:]
+            hdf5_paths = np.array([f"{hdf5_base_path}{firstLetterCapitalize(component)}:{name}" for name in lineNames])
+        
+        # Cache the result
+        self._line_metadata_cache[cache_key] = (lineNames, lineWavelengths, hdf5_paths)
+        
+        return lineNames, lineWavelengths, hdf5_paths
 
     def load_sed_template(self):
         """
@@ -874,7 +927,13 @@ class sed_calculator:
         
         if include_emission_lines:
             minimumLineFlux = minFlux(minimumLineFlux)
-            lineNames, lineRestWavelengths, lineLuminosities = getLineProperties(filename, component=component, galIndex=galIndex)
+            # Get cached line metadata (names and wavelengths are same for all galaxies)
+            lineNames, lineRestWavelengths, hdf5_paths = self._get_line_metadata(filename, component)
+            
+            # Read only the luminosities for this specific galaxy
+            with h5py.File(filename, 'r') as f:
+                lineLuminosities = np.array([f[path][galIndex] for path in hdf5_paths])
+            
             for lineName, lineRestWavelength, lineLuminosity in zip(lineNames, lineRestWavelengths, lineLuminosities):
                 lineWavelength = (lineRestWavelength * u.AA) * (1 + redshift)
                 if (lineWavelength < minimumLineWavelength) or (lineWavelength > maximumLineWavelength):
