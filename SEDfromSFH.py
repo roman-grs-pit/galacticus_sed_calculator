@@ -870,7 +870,7 @@ class sed_calculator:
         - For the 'AGN' component, the continuum is set to zero, and only emission lines are included (if `include_emission_lines` is True).
         - Emission lines are modeled as Gaussian profiles with the specified `lineFWHM`.
         - When `use_synphot=True`, the method relies on the synphot library for spectrum calculations.
-        - When `use_synphot=False`, direct numpy operations are used for significantly faster performance (~10x speedup).
+        - When `use_synphot=False`, direct numpy operations are used for faster performance (~2-4 speedup).
         - This method validates that the SFH binning in the Galacticus file matches the SED template binning.
         """
         valid_components = ['disk', 'spheroid', 'AGN']
@@ -953,12 +953,10 @@ class sed_calculator:
                     line_Fnu = line_flux_per_AA * continuum_wav**2 / const.c
                     total_Fnu += line_Fnu.to('erg/(s cm^2 Hz)')
         
-        if use_synphot:
-            component_spectrum = total_flux
-            return component_spectrum
-        else:
-            # Return tuple of (wavelength, flux_density)
-            return continuum_wav, total_Fnu
+        if not use_synphot:
+            total_flux = SourceSpectrum(Empirical1D, points=continuum_wav, lookup_table=total_Fnu)
+        component_spectrum = total_flux
+        return component_spectrum
     
     def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA, include_emission_lines=True, minimumLineFlux=0, minimumLineWavelength = 0.9*u.micron, maximumLineWavelength = 2.03*u.micron, use_synphot=True):
         components=['disk','spheroid']
