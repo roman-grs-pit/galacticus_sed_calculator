@@ -848,15 +848,11 @@ class sed_calculator:
 
         Returns
         -------
-        component_spectrum : synphot.SourceSpectrum or tuple
-            If `use_synphot=True`: Returns a synphot SourceSpectrum object. The spectrum includes both the continuum
+        component_spectrum : synphot.SourceSpectrum
+            Returns a synphot SourceSpectrum object. The spectrum includes both the continuum
             and emission lines (if `include_emission_lines` is True).
             - `component_spectrum.waveset` returns a wavelength array with astropy units.
             - `component_spectrum(wav, flux_unit='FNU')` returns the Fnu flux at the wavelengths `wav`, also with astropy units.
-            
-            If `use_synphot=False`: Returns a tuple (wavelength, flux_density) where:
-            - wavelength: array with astropy units (Angstroms)
-            - flux_density: array with astropy units (Lsun / (Hz Mpc^2))
 
         Raises
         ------
@@ -870,7 +866,8 @@ class sed_calculator:
         - For the 'AGN' component, the continuum is set to zero, and only emission lines are included (if `include_emission_lines` is True).
         - Emission lines are modeled as Gaussian profiles with the specified `lineFWHM`.
         - When `use_synphot=True`, the method relies on the synphot library for spectrum calculations.
-        - When `use_synphot=False`, direct numpy operations are used for faster performance (~2-4 speedup).
+        - When `use_synphot=False`, direct numpy operations are used for faster performance (~2-4 speedup), though the final result is still
+          cast as a synphot.SourceSpectrum object.
         - This method validates that the SFH binning in the Galacticus file matches the SED template binning.
         """
         valid_components = ['disk', 'spheroid', 'AGN']
