@@ -87,6 +87,7 @@ class TestSaveToGalacticusFile(unittest.TestCase):
         self.temp_file.close()
         
         # Create a mock Galacticus lightcone file
+        np.random.seed(123)  # Use seed for deterministic test data
         with h5py.File(self.temp_file.name, 'w') as f:
             # Create lightcone structure
             lightcone = f.create_group('Lightcone')
@@ -250,6 +251,7 @@ class TestFixedTimeFormat(unittest.TestCase):
         self.temp_file.close()
         
         # Create a mock Galacticus fixed-time file
+        np.random.seed(456)  # Use seed for deterministic test data
         with h5py.File(self.temp_file.name, 'w') as f:
             outputs = f.create_group('Outputs')
             

@@ -334,7 +334,7 @@ def parse_arguments():
     
     # Save options
     save_group = parser.add_mutually_exclusive_group()
-    save_group.add_argument('--save-to-input', action='store_true', default=True,
+    save_group.add_argument('--save-to-input', action='store_true',
                            help='Save random numbers to the input Galacticus file (default)')
     save_group.add_argument('--save-to-file', metavar='OUTPUT',
                            help='Save random numbers to a separate HDF5 file instead')
