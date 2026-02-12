@@ -4,8 +4,12 @@ Tests for SED calculator compatibility validation.
 import unittest
 import tempfile
 import os
+import sys
 import h5py
 import numpy as np
+
+# Add parent directory to path to import SEDfromSFH
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from SEDfromSFH import sed_calculator
 
 
@@ -14,8 +18,11 @@ class TestSEDTemplateParameterExtraction(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-        self.galacticus_file = 'data/romanUNIT.hdf5'
+        # Get path to data directory relative to this test file
+        test_dir = os.path.dirname(__file__)
+        parent_dir = os.path.dirname(test_dir)
+        self.sed_template_file = os.path.join(parent_dir, 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5')
+        self.galacticus_file = os.path.join(parent_dir, 'data/romanUNIT.hdf5')
         self.calc = sed_calculator(self.sed_template_file)
     
     def test_get_sed_template_parameters(self):
@@ -57,8 +64,11 @@ class TestSFHCompatibilityValidation(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-        self.galacticus_file = 'data/romanUNIT.hdf5'
+        # Get path to data directory relative to this test file
+        test_dir = os.path.dirname(__file__)
+        parent_dir = os.path.dirname(test_dir)
+        self.sed_template_file = os.path.join(parent_dir, 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5')
+        self.galacticus_file = os.path.join(parent_dir, 'data/romanUNIT.hdf5')
         self.calc = sed_calculator(self.sed_template_file)
     
     def test_compatible_files_pass_validation(self):

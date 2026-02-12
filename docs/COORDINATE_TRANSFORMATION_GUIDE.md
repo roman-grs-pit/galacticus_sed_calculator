@@ -4,7 +4,7 @@ This document provides detailed examples of how to use the new RA and Dec coordi
 
 ## Overview
 
-The `calculate_catalog_coordinates.py` script converts Galacticus lightcone angular coordinates (theta, phi) to astronomical Right Ascension (RA) and Declination (Dec) coordinates. This allows you to:
+The `scripts/calculate_catalog_coordinates.py` script converts Galacticus lightcone angular coordinates (theta, phi) to astronomical Right Ascension (RA) and Declination (Dec) coordinates. This allows you to:
 
 - Reposition the field center to any location on the sky
 - Apply a roll angle to rotate the field around the line of sight
@@ -18,7 +18,7 @@ The `calculate_catalog_coordinates.py` script converts Galacticus lightcone angu
 Convert coordinates with default field center at north pole:
 
 ```bash
-python calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5
+python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5
 ```
 
 This creates a new file `data/galacticus_lightcone_with_coordinates.hdf5` with RA and Dec datasets added.
@@ -28,7 +28,7 @@ This creates a new file `data/galacticus_lightcone_with_coordinates.hdf5` with R
 Place the field center at a specific location on the sky:
 
 ```bash
-python calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
+python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
     --ra0 150.5 --dec0 30.2
 ```
 
@@ -37,7 +37,7 @@ python calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
 Rotate the field by 45 degrees around the line of sight:
 
 ```bash
-python calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
+python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
     --ra0 150.5 --dec0 30.2 --roll 45
 ```
 
@@ -46,7 +46,7 @@ python calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
 Save coordinates to a standalone file instead of modifying the catalog:
 
 ```bash
-python calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
+python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
     --ra0 150 --dec0 30 \
     --save-to-file coordinates.hdf5
 ```
@@ -161,7 +161,7 @@ The output HDF5 file contains:
 Position a 4 square degree field at a typical Roman survey location:
 
 ```bash
-python calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
+python scripts/calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
     --ra0 270.0 --dec0 -30.0 --roll 0
 ```
 
@@ -171,12 +171,12 @@ Process the same catalog with different field positions:
 
 ```bash
 # Field 1
-python calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
+python scripts/calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
     --ra0 150 --dec0 2 \
     --save-to-file field1_coords.hdf5
 
 # Field 2
-python calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
+python scripts/calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
     --ra0 180 --dec0 -15 \
     --save-to-file field2_coords.hdf5
 ```
@@ -186,7 +186,7 @@ python calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
 Process only the first 100 galaxies for testing:
 
 ```bash
-python calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
+python scripts/calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
     --ra0 100 --dec0 25 \
     --max-galaxies 100
 ```

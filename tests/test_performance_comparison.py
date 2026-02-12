@@ -8,14 +8,21 @@ This script compares the performance of the two approaches for generating galaxy
 import time
 import numpy as np
 import astropy.units as u
+import os
+import sys
+
+# Add parent directory to path to import SEDfromSFH
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from SEDfromSFH import sed_calculator
 
 def test_performance():
     """Test and compare performance of synphot vs fast path."""
     
     # Setup
-    sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-    galacticus_file = 'data/romanUNIT.hdf5'
+    test_dir = os.path.dirname(__file__)
+    parent_dir = os.path.dirname(test_dir)
+    sed_template_file = os.path.join(parent_dir, 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5')
+    galacticus_file = os.path.join(parent_dir, 'data/romanUNIT.hdf5')
     calc = sed_calculator(sed_template_file)
     
     # Use a high-resolution wavelength grid to resolve emission lines

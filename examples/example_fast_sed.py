@@ -8,6 +8,11 @@ SED generation when processing many galaxies.
 
 import numpy as np
 import astropy.units as u
+import os
+import sys
+
+# Add parent directory to path to import SEDfromSFH
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from SEDfromSFH import sed_calculator
 
 def main():
@@ -17,8 +22,10 @@ def main():
     print()
     
     # Initialize calculator
-    sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-    galacticus_file = 'data/romanUNIT.hdf5'
+    example_dir = os.path.dirname(__file__)
+    parent_dir = os.path.dirname(example_dir)
+    sed_template_file = os.path.join(parent_dir, 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5')
+    galacticus_file = os.path.join(parent_dir, 'data/romanUNIT.hdf5')
     calc = sed_calculator(sed_template_file)
     
     # Define wavelength grid - needs to be fine enough to resolve emission lines

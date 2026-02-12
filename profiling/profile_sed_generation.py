@@ -8,7 +8,7 @@ SED generation and identify bottlenecks such as:
 - Other computational operations
 
 Usage:
-    python profile_sed_generation.py [--num-galaxies NUM] [--output-file FILE]
+    python profiling/profile_sed_generation.py [--num-galaxies NUM] [--output-file FILE]
 """
 
 import argparse
@@ -18,6 +18,11 @@ import pstats
 import io
 import numpy as np
 import astropy.units as u
+import os
+import sys
+
+# Add parent directory to path to import SEDfromSFH
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from SEDfromSFH import sed_calculator
 
 
@@ -368,14 +373,14 @@ Examples:
     
     parser.add_argument(
         '--sed-template',
-        default='./data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5',
-        help='Path to SED template file (default: ./data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5)'
+        default='../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5',
+        help='Path to SED template file (default: ../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5)'
     )
     
     parser.add_argument(
         '--galaxy-catalog',
-        default='./data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5',
-        help='Path to galaxy catalog file (default: ./data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5)'
+        default='../data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5',
+        help='Path to galaxy catalog file (default: ../data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5)'
     )
     
     parser.add_argument(
