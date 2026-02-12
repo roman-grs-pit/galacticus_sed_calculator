@@ -848,11 +848,16 @@ class SEDCalculator:
 
         Returns
         -------
-        component_spectrum : synphot.SourceSpectrum
-            Returns a synphot SourceSpectrum object. The spectrum includes both the continuum
-            and emission lines (if `include_emission_lines` is True).
-            - `component_spectrum.waveset` returns a wavelength array with astropy units.
-            - `component_spectrum(wav, flux_unit='FNU')` returns the Fnu flux at the wavelengths `wav`, also with astropy units.
+        component_spectrum : synphot.SourceSpectrum or tuple
+            When `use_synphot=True` (default):
+                Returns a synphot SourceSpectrum object. The spectrum includes both the continuum
+                and emission lines (if `include_emission_lines` is True).
+                - `component_spectrum.waveset` returns a wavelength array with astropy units.
+                - `component_spectrum(wav, flux_unit='FNU')` returns the Fnu flux at the wavelengths `wav`, also with astropy units.
+            When `use_synphot=False`:
+                Returns a tuple of (wavelengths, flux_density):
+                - wavelengths : Quantity array in Angstroms
+                - flux_density : Quantity array in erg/(s cm^2 Hz)
 
         Raises
         ------
@@ -866,8 +871,8 @@ class SEDCalculator:
         - For the 'AGN' component, the continuum is set to zero, and only emission lines are included (if `include_emission_lines` is True).
         - Emission lines are modeled as Gaussian profiles with the specified `lineFWHM`.
         - When `use_synphot=True`, the method relies on the synphot library for spectrum calculations.
-        - When `use_synphot=False`, direct numpy operations are used for faster performance (~2-4 speedup), though the final result is still
-          cast as a synphot.SourceSpectrum object.
+        - When `use_synphot=False`, direct numpy operations are used for faster performance (~2-4x speedup) and returns
+          numpy arrays rather than synphot objects.
         - This method validates that the SFH binning in the Galacticus file matches the SED template binning.
         """
         valid_components = ['disk', 'spheroid', 'AGN']
@@ -950,10 +955,12 @@ class SEDCalculator:
                     line_Fnu = line_flux_per_AA * continuum_wav**2 / const.c
                     total_Fnu += line_Fnu.to('erg/(s cm^2 Hz)')
         
-        if not use_synphot:
-            total_flux = SourceSpectrum(Empirical1D, points=continuum_wav, lookup_table=total_Fnu)
-        component_spectrum = total_flux
-        return component_spectrum
+        if use_synphot:
+            component_spectrum = total_flux
+            return component_spectrum
+        else:
+            # Return tuple of (wavelength, flux) arrays
+            return (continuum_wav, total_Fnu)
     
     def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA, include_emission_lines=True, minimumLineFlux=0, minimumLineWavelength = 0.9*u.micron, maximumLineWavelength = 2.03*u.micron, use_synphot=True):
         components=['disk','spheroid']
@@ -961,11 +968,24 @@ class SEDCalculator:
             components.append('AGN')    
         for i,component in enumerate(components):
             spectrum = self.evaluate_component_spectrum(filename, galIndex, component=component, obs_wavelengths=obs_wavelengths, lineFWHM=lineFWHM, include_emission_lines=include_emission_lines, minimumLineFlux=minimumLineFlux, minimumLineWavelength=minimumLineWavelength, maximumLineWavelength=maximumLineWavelength, use_synphot=use_synphot)
-            if i==0:
-                total_spectrum = spectrum
+            if use_synphot:
+                if i==0:
+                    total_spectrum = spectrum
+                else:
+                    total_spectrum += spectrum
             else:
-                total_spectrum += spectrum
-        return total_spectrum
+                # When use_synphot=False, spectrum is a tuple (wav, flux)
+                wav, flux = spectrum
+                if i==0:
+                    total_wav = wav
+                    total_flux = flux
+                else:
+                    total_flux += flux
+        
+        if use_synphot:
+            return total_spectrum
+        else:
+            return (total_wav, total_flux)
     
     def calculate_magnitudes(self, filename, galIndex, bandpasses, component='total', 
                             magnitude_system='AB', obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA,
