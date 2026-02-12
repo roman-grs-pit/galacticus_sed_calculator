@@ -8,6 +8,7 @@ Classes and methods to generate spectra for galaxies simulated with Galacticus, 
 - **Spectrum generation**: Create full spectra including continuum and emission lines
 - **Magnitude calculation**: Calculate observed magnitudes in arbitrary bandpasses
 - **Coordinate transformation**: Convert lightcone angular positions to RA/Dec with field repositioning
+- **Random number generation**: Generate uniform random numbers for stochastic galaxy properties
 - **Cross-validation**: Compare results from different Galacticus output formats
 - **Performance profiling**: Tools to analyze and optimize SED generation performance
 
@@ -146,12 +147,58 @@ The transformation process:
 4. Rotates to reposition field center from (RA=0°, Dec=90°) to (RA0, Dec0)
 5. Converts back to (RA, Dec) spherical coordinates in degrees
 
+### Generate Random Numbers for Galaxies
+
+Generate uniform random numbers [0, 1) for each galaxy, useful for stochastic properties like dust attenuation scatter or galaxy inclinations. Works with both lightcone and fixed-time formats:
+
+```bash
+# Basic usage - saves to new file with '_with_random' suffix
+python calculate_catalog_random_numbers.py galacticus_catalog.hdf5
+
+# Generate 10 random numbers per galaxy with specific seed
+python calculate_catalog_random_numbers.py galacticus_catalog.hdf5 \
+    --n-random 10 --seed 42
+
+# Save to separate file instead
+python calculate_catalog_random_numbers.py galacticus_catalog.hdf5 \
+    --save-to-file random_numbers.hdf5
+
+# Test with limited galaxies
+python calculate_catalog_random_numbers.py galacticus_catalog.hdf5 \
+    --max-galaxies 100
+```
+
+This adds `randomUniform` datasets to the catalog with the following features:
+- Generates 5 random numbers per galaxy by default (configurable with `--n-random`)
+- Random numbers uniformly distributed in [0, 1)
+- Optional seed for reproducibility (`--seed`)
+- For fixed-time catalogs: generates random numbers at each output time
+- Saves to a copy of the input file by default (with `_with_random` suffix)
+- Can save to a separate file with `--save-to-file`
+- Records seed and number of random values in dataset attributes
+- Dataset shape: (n_galaxies, n_random)
+
+Example usage in Python:
+```python
+import h5py
+
+with h5py.File('galacticus_catalog_with_random.hdf5', 'r') as f:
+    # For lightcone format
+    random_numbers = f['/Lightcone/Output1/nodeData/randomUniform'][:]
+    # random_numbers has shape (n_galaxies, 5) by default
+    
+    # For fixed-time format
+    random_numbers = f['/Outputs/Output1/nodeData/randomUniform'][:]
+    # Each output has its own random numbers
+```
+
 ## Testing
 
 Run tests with unittest:
 ```bash
 python -m unittest test_SEDfromSFH
 python -m unittest test_coordinates
+python -m unittest test_random_numbers
 ```
 
 ## Performance Profiling
