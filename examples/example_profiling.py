@@ -10,15 +10,22 @@ This demonstrates the exact setup requested:
 import numpy as np
 import astropy.units as u
 import time
-from SEDfromSFH import sed_calculator
+import os
+import sys
+
+# Add parent directory to path to import galacticus_sed_calculator
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from galacticus_sed_calculator import SEDCalculator
 
 # Setup (do this once)
-sedTemplateFilename = "./data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5"
-galacticus_file = "./data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5"
+example_dir = os.path.dirname(__file__)
+parent_dir = os.path.dirname(example_dir)
+sedTemplateFilename = os.path.join(parent_dir, "data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5")
+galacticus_file = os.path.join(parent_dir, "data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5")
 
 print("Initializing SED calculator...")
 t0 = time.time()
-sedCalc = sed_calculator(sedTemplateFilename)
+sedCalc = SEDCalculator(sedTemplateFilename)
 init_time = time.time() - t0
 print(f"Initialization took {init_time:.4f} s\n")
 

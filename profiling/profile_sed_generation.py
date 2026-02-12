@@ -8,7 +8,7 @@ SED generation and identify bottlenecks such as:
 - Other computational operations
 
 Usage:
-    python profile_sed_generation.py [--num-galaxies NUM] [--output-file FILE]
+    python profiling/profile_sed_generation.py [--num-galaxies NUM] [--output-file FILE]
 """
 
 import argparse
@@ -18,7 +18,12 @@ import pstats
 import io
 import numpy as np
 import astropy.units as u
-from SEDfromSFH import sed_calculator
+import os
+import sys
+
+# Add parent directory to path to import galacticus_sed_calculator
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from galacticus_sed_calculator import SEDCalculator
 
 
 def profile_sed_generation(
@@ -69,7 +74,7 @@ def profile_sed_generation(
     # Initialize calculator (time this separately)
     print("\nInitializing SED calculator...")
     t0 = time.time()
-    sedCalc = sed_calculator(sed_template_filename)
+    sedCalc = SEDCalculator(sed_template_filename)
     init_time = time.time() - t0
     print(f"  Initialization time: {init_time:.4f} s")
     
@@ -263,7 +268,7 @@ def profile_sed_components(
     
     # Time: SED calculator initialization
     t0 = time.time()
-    sedCalc = sed_calculator(sed_template_filename)
+    sedCalc = SEDCalculator(sed_template_filename)
     component_times['init_calculator'] = time.time() - t0
     print(f"Initialize calculator: {component_times['init_calculator']:.4f} s")
     
@@ -368,14 +373,14 @@ Examples:
     
     parser.add_argument(
         '--sed-template',
-        default='./data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5',
-        help='Path to SED template file (default: ./data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5)'
+        default='../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5',
+        help='Path to SED template file (default: ../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5)'
     )
     
     parser.add_argument(
         '--galaxy-catalog',
-        default='./data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5',
-        help='Path to galaxy catalog file (default: ./data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5)'
+        default='../data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5',
+        help='Path to galaxy catalog file (default: ../data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5)'
     )
     
     parser.add_argument(

@@ -4,9 +4,13 @@ Tests for SED calculator compatibility validation.
 import unittest
 import tempfile
 import os
+import sys
 import h5py
 import numpy as np
-from SEDfromSFH import sed_calculator
+
+# Add parent directory to path to import galacticus_sed_calculator
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from galacticus_sed_calculator import SEDCalculator
 
 
 class TestSEDTemplateParameterExtraction(unittest.TestCase):
@@ -14,9 +18,12 @@ class TestSEDTemplateParameterExtraction(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-        self.galacticus_file = 'data/romanUNIT.hdf5'
-        self.calc = sed_calculator(self.sed_template_file)
+        # Get path to data directory relative to this test file
+        test_dir = os.path.dirname(__file__)
+        parent_dir = os.path.dirname(test_dir)
+        self.sed_template_file = os.path.join(parent_dir, 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5')
+        self.galacticus_file = os.path.join(parent_dir, 'data/romanUNIT.hdf5')
+        self.calc = SEDCalculator(self.sed_template_file)
     
     def test_get_sed_template_parameters(self):
         """Test that SED template parameters are correctly extracted."""
@@ -57,9 +64,12 @@ class TestSFHCompatibilityValidation(unittest.TestCase):
     
     def setUp(self):
         """Set up test fixtures."""
-        self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-        self.galacticus_file = 'data/romanUNIT.hdf5'
-        self.calc = sed_calculator(self.sed_template_file)
+        # Get path to data directory relative to this test file
+        test_dir = os.path.dirname(__file__)
+        parent_dir = os.path.dirname(test_dir)
+        self.sed_template_file = os.path.join(parent_dir, 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5')
+        self.galacticus_file = os.path.join(parent_dir, 'data/romanUNIT.hdf5')
+        self.calc = SEDCalculator(self.sed_template_file)
     
     def test_compatible_files_pass_validation(self):
         """Test that compatible SED template and SFH pass validation."""
@@ -168,7 +178,7 @@ class TestIntegrationWithEvaluateComponentSpectrum(unittest.TestCase):
         """Set up test fixtures."""
         self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.galacticus_file = 'data/romanUNIT.hdf5'
-        self.calc = sed_calculator(self.sed_template_file)
+        self.calc = SEDCalculator(self.sed_template_file)
     
     def test_evaluate_component_spectrum_validates_compatibility(self):
         """Test that evaluate_component_spectrum validates compatibility."""
@@ -213,7 +223,7 @@ class TestCalculateMagnitudes(unittest.TestCase):
         """Set up test fixtures."""
         self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.galacticus_file = 'data/romanUNIT.hdf5'
-        self.calc = sed_calculator(self.sed_template_file)
+        self.calc = SEDCalculator(self.sed_template_file)
     
     def test_calculate_magnitudes_method_exists(self):
         """Test that calculate_magnitudes method exists and has correct signature."""
@@ -379,7 +389,7 @@ class TestFixedTimeFormat(unittest.TestCase):
         """Set up test fixtures including a fixed-time format test file."""
         self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.lightcone_file = 'data/romanUNIT.hdf5'
-        self.calc = sed_calculator(self.sed_template_file)
+        self.calc = SEDCalculator(self.sed_template_file)
         
         # Create a fixed-time format test file
         self.fixed_time_file = None
@@ -574,7 +584,7 @@ class TestFixedTimeFormat(unittest.TestCase):
                 diskSFH.attrs['time'] = times
             
             # Should not raise an exception with fixed-time parameter names and matching times
-            calc = sed_calculator(tmp_sed_filename)
+            calc = SEDCalculator(tmp_sed_filename)
             calc.validate_sfh_compatibility(tmp_gal_filename)
             
         finally:
@@ -590,7 +600,7 @@ class TestSEDTemplateFormats(unittest.TestCase):
     def test_lightcone_sed_template(self):
         """Test that lightcone SED templates (with /ages) load correctly."""
         sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-        calc = sed_calculator(sed_template_file)
+        calc = SEDCalculator(sed_template_file)
         
         # Check format was detected correctly
         self.assertEqual(calc.sedTemplateFormat, 'lightcone')
@@ -634,7 +644,7 @@ class TestSEDTemplateFormats(unittest.TestCase):
                 dst.create_dataset('wavelength', data=wavelength)
             
             # Load and test
-            calc = sed_calculator(tmp_filename)
+            calc = SEDCalculator(tmp_filename)
             
             # Check format was detected correctly
             self.assertEqual(calc.sedTemplateFormat, 'fixed-time')
@@ -679,7 +689,7 @@ class TestSEDTemplateFormats(unittest.TestCase):
             
             # Should raise ValueError
             with self.assertRaises(ValueError) as context:
-                sed_calculator(tmp_filename)
+                SEDCalculator(tmp_filename)
             
             self.assertIn('ages', str(context.exception))
             self.assertIn('time', str(context.exception))
@@ -698,7 +708,7 @@ class TestFormatValidation(unittest.TestCase):
         
         # Use existing lightcone SED template
         sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-        calc = sed_calculator(sed_template_file)
+        calc = SEDCalculator(sed_template_file)
         
         with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
             tmp_filename = tmp.name
@@ -730,7 +740,7 @@ class TestFormatValidation(unittest.TestCase):
         import tempfile
         
         sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-        calc = sed_calculator(sed_template_file)
+        calc = SEDCalculator(sed_template_file)
         
         with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
             tmp_filename = tmp.name
@@ -812,7 +822,7 @@ class TestFormatValidation(unittest.TestCase):
                 diskSFH.attrs['time'] = times  # Same times as SED template
             
             # Should pass
-            calc = sed_calculator(tmp_sed_filename)
+            calc = SEDCalculator(tmp_sed_filename)
             calc.validate_sfh_compatibility(tmp_gal_filename)
             
         finally:
@@ -871,7 +881,7 @@ class TestFormatValidation(unittest.TestCase):
                 diskSFH.attrs['time'] = different_times  # Different times
             
             # Should fail with time array mismatch
-            calc = sed_calculator(tmp_sed_filename)
+            calc = SEDCalculator(tmp_sed_filename)
             with self.assertRaises(ValueError) as context:
                 calc.validate_sfh_compatibility(tmp_gal_filename)
             
@@ -891,7 +901,7 @@ class TestFastSEDGeneration(unittest.TestCase):
         """Set up test fixtures."""
         self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.galacticus_file = 'data/romanUNIT.hdf5'
-        self.calc = sed_calculator(self.sed_template_file)
+        self.calc = SEDCalculator(self.sed_template_file)
     
     def test_use_synphot_parameter_exists(self):
         """Test that use_synphot parameter is accepted."""
@@ -907,9 +917,10 @@ class TestFastSEDGeneration(unittest.TestCase):
         )
         self.assertIsNotNone(spectrum)
     
-    def test_use_synphot_false_returns_tuple(self):
-        """Test that use_synphot=False returns a tuple."""
+    def test_use_synphot_false_returns_sourcespectrum(self):
+        """Test that use_synphot=False returns a SourceSpectrum (same as use_synphot=True)."""
         import astropy.units as u
+        from synphot import SourceSpectrum
         wavelengths = np.linspace(10000, 20000, 100) * u.AA
         result = self.calc.evaluate_component_spectrum(
             self.galacticus_file,
@@ -918,14 +929,11 @@ class TestFastSEDGeneration(unittest.TestCase):
             obs_wavelengths=wavelengths,
             use_synphot=False
         )
-        # Should return a tuple
-        self.assertIsInstance(result, tuple)
-        self.assertEqual(len(result), 2)
-        
-        # Check that both elements are quantities with proper units
-        wav, flux = result
-        self.assertIsInstance(wav, u.Quantity)
-        self.assertIsInstance(flux, u.Quantity)
+        # Should return a SourceSpectrum object, not a tuple
+        self.assertIsInstance(result, SourceSpectrum)
+        # Verify it has the expected methods
+        self.assertTrue(hasattr(result, 'waveset'))
+        self.assertTrue(callable(result))
     
     def test_use_synphot_false_requires_wavelengths(self):
         """Test that use_synphot=False requires obs_wavelengths."""
@@ -957,7 +965,7 @@ class TestFastSEDGeneration(unittest.TestCase):
         )
         
         # Get spectrum with fast path
-        wav_fast, flux_fast = self.calc.evaluate_component_spectrum(
+        spectrum_fast = self.calc.evaluate_component_spectrum(
             self.galacticus_file,
             galIndex=0,
             component='disk',
@@ -966,8 +974,9 @@ class TestFastSEDGeneration(unittest.TestCase):
             use_synphot=False
         )
         
-        # Evaluate synphot spectrum at the same wavelengths
+        # Evaluate both spectra at the same wavelengths
         flux_synphot = spectrum_synphot(wavelengths, flux_unit='FNU')
+        flux_fast = spectrum_fast(wavelengths, flux_unit='FNU')
         
         # Convert to same units for comparison
         flux_synphot_val = flux_synphot.to_value(u.Lsun / (u.Hz * u.Mpc**2))
@@ -979,12 +988,13 @@ class TestFastSEDGeneration(unittest.TestCase):
     def test_fast_path_with_emission_lines(self):
         """Test that fast path works with emission lines."""
         import astropy.units as u
+        from synphot import SourceSpectrum
         
         # Use a fine wavelength grid to resolve emission lines
         wavelengths = np.linspace(8000, 30000, 2000) * u.AA
         
         # Get spectrum with emission lines
-        wav_fast, flux_fast = self.calc.evaluate_component_spectrum(
+        spectrum_fast = self.calc.evaluate_component_spectrum(
             self.galacticus_file,
             galIndex=0,
             component='disk',
@@ -993,9 +1003,11 @@ class TestFastSEDGeneration(unittest.TestCase):
             use_synphot=False
         )
         
-        # Check that we got results
-        self.assertEqual(len(wav_fast), len(wavelengths))
-        self.assertEqual(len(flux_fast), len(wavelengths))
+        # Should return a SourceSpectrum
+        self.assertIsInstance(spectrum_fast, SourceSpectrum)
+        
+        # Evaluate at wavelengths
+        flux_fast = spectrum_fast(wavelengths, flux_unit='FNU')
         
         # Flux should be non-negative
         self.assertTrue(np.all(flux_fast.value >= 0))
@@ -1036,13 +1048,14 @@ class TestFastSEDGeneration(unittest.TestCase):
     def test_line_metadata_caching(self):
         """Test that emission line metadata is properly cached."""
         import astropy.units as u
+        from synphot import SourceSpectrum
         
         wavelengths = np.linspace(10000, 20000, 100) * u.AA
         
         # First call should populate cache
         self.assertNotIn((self.galacticus_file, 'disk'), self.calc._line_metadata_cache)
         
-        wav1, flux1 = self.calc.evaluate_component_spectrum(
+        spectrum1 = self.calc.evaluate_component_spectrum(
             self.galacticus_file,
             galIndex=0,
             component='disk',
@@ -1050,6 +1063,9 @@ class TestFastSEDGeneration(unittest.TestCase):
             include_emission_lines=True,
             use_synphot=False
         )
+        
+        # Should return SourceSpectrum
+        self.assertIsInstance(spectrum1, SourceSpectrum)
         
         # Cache should now be populated
         self.assertIn((self.galacticus_file, 'disk'), self.calc._line_metadata_cache)
@@ -1067,7 +1083,7 @@ class TestFastSEDGeneration(unittest.TestCase):
         # Second call should reuse cache (same object reference)
         cached_data = self.calc._line_metadata_cache[(self.galacticus_file, 'disk')]
         
-        wav2, flux2 = self.calc.evaluate_component_spectrum(
+        spectrum2 = self.calc.evaluate_component_spectrum(
             self.galacticus_file,
             galIndex=1,
             component='disk',

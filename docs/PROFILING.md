@@ -17,27 +17,27 @@ The `profile_sed_generation.py` script provides a comprehensive framework for pr
 
 Profile the first 100 galaxies:
 ```bash
-python profile_sed_generation.py --num-galaxies 100
+python profiling/profile_sed_generation.py --num-galaxies 100
 ```
 
 ### Component-Level Profiling
 
 Analyze individual components for a single galaxy:
 ```bash
-python profile_sed_generation.py --component-profile --galaxy-index 8
+python profiling/profile_sed_generation.py --component-profile --galaxy-index 8
 ```
 
 ### Detailed Function-Level Profiling
 
 Get detailed cProfile output for the first galaxy:
 ```bash
-python profile_sed_generation.py --num-galaxies 50 --detailed-profile
+python profiling/profile_sed_generation.py --num-galaxies 50 --detailed-profile
 ```
 
 ### Save Results to File
 
 ```bash
-python profile_sed_generation.py --num-galaxies 100 --output-file results.txt
+python profiling/profile_sed_generation.py --num-galaxies 100 --output-file results.txt
 ```
 
 ## Usage Examples
@@ -46,7 +46,7 @@ python profile_sed_generation.py --num-galaxies 100 --output-file results.txt
 
 Test the setup from the agent instructions:
 ```bash
-python profile_sed_generation.py --num-galaxies 10
+python profiling/profile_sed_generation.py --num-galaxies 10
 ```
 
 This will:
@@ -58,7 +58,7 @@ This will:
 
 Identify which operations are slow:
 ```bash
-python profile_sed_generation.py --component-profile --galaxy-index 8
+python profiling/profile_sed_generation.py --component-profile --galaxy-index 8
 ```
 
 This breaks down the time spent on:
@@ -72,14 +72,14 @@ This breaks down the time spent on:
 
 Profile all galaxies in the catalog:
 ```bash
-python profile_sed_generation.py --output-file full_profile.txt
+python profiling/profile_sed_generation.py --output-file full_profile.txt
 ```
 
 ### Example 4: Different Wavelength Grid
 
 Test with a different wavelength sampling:
 ```bash
-python profile_sed_generation.py \
+python profiling/profile_sed_generation.py \
     --num-galaxies 50 \
     --wavelength-min 0.8 \
     --wavelength-max 1.8 \
@@ -290,7 +290,7 @@ total_flux = sedCalc.evaluate_total_spectrum(
 
 To profile this exact setup:
 ```bash
-python profile_sed_generation.py \
+python profiling/profile_sed_generation.py \
     --sed-template ./data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5 \
     --galaxy-catalog ./data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5 \
     --num-galaxies 1186
@@ -298,5 +298,5 @@ python profile_sed_generation.py \
 
 Or for component-level profiling of galaxy 8:
 ```bash
-python profile_sed_generation.py --component-profile --galaxy-index 8
+python profiling/profile_sed_generation.py --component-profile --galaxy-index 8
 ```

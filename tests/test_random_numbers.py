@@ -6,6 +6,10 @@ import numpy as np
 import h5py
 import tempfile
 import os
+import sys
+
+# Add parent directory to path to import from scripts
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
 from calculate_catalog_random_numbers import (
     generate_random_numbers,
     calculate_catalog_random_numbers,

@@ -1,6 +1,42 @@
 # galacticus_sed_calculator
 Classes and methods to generate spectra for galaxies simulated with Galacticus, based on a saved star formation history.
 
+## Installation
+
+Install the package in editable mode for development:
+
+```bash
+pip install -e .
+```
+
+Or install with optional dependencies:
+
+```bash
+# For running the scripts
+pip install -e ".[scripts]"
+
+# For development and testing
+pip install -e ".[dev]"
+```
+
+## Repository Structure
+
+```
+galacticus_sed_calculator/
+├── galacticus_sed_calculator/ # Main package directory
+│   ├── __init__.py            # Package initialization
+│   └── sed_calculator.py      # SED calculator module
+├── scripts/                   # Command-line utilities
+│   ├── calculate_catalog_coordinates.py
+│   ├── calculate_catalog_magnitudes.py
+│   └── calculate_catalog_random_numbers.py
+├── tests/                     # Unit tests
+├── examples/                  # Example scripts and notebooks
+├── profiling/                 # Performance profiling tools
+├── docs/                      # Documentation
+└── data/                      # Test data files
+```
+
 ## Features
 
 - **Automatic format detection**: Supports both lightcone and fixed-time Galacticus output formats
@@ -31,17 +67,17 @@ The format is automatically detected - no configuration needed!
 
 ## Usage
 
-For usage examples, see [exampleUsage.ipynb](exampleUsage.ipynb).
+For usage examples, see [exampleUsage.ipynb](examples/exampleUsage.ipynb).
 
 ### Basic Example
 
 ```python
-from SEDfromSFH import sed_calculator
+from galacticus_sed_calculator import SEDCalculator
 import numpy as np
 import astropy.units as u
 
 # Initialize calculator with SED template
-calc = sed_calculator('sed_template.hdf5')
+calc = SEDCalculator('sed_template.hdf5')
 
 # Works with both lightcone and fixed-time formats!
 galData = calc.read_galacticus_galaxy('galacticus_output.hdf5', galIndex=0)
@@ -120,16 +156,16 @@ For lightcone catalogs, convert the angular positions (theta, phi) to astronomic
 
 ```bash
 # Basic usage - saves to new file with '_with_coordinates' suffix
-python calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
+python scripts/calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
     --ra0 150 --dec0 30 --roll 0
 
 # Save to separate file instead
-python calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
+python scripts/calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
     --ra0 150 --dec0 30 --roll 0 \
     --save-to-file coordinates.hdf5
 
 # Reposition field center to different location
-python calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
+python scripts/calculate_catalog_coordinates.py galacticus_lightcone.hdf5 \
     --ra0 45.5 --dec0 -12.3 --roll 15
 ```
 
@@ -153,18 +189,18 @@ Generate uniform random numbers [0, 1) for each galaxy, useful for stochastic pr
 
 ```bash
 # Basic usage - saves to new file with '_with_random' suffix
-python calculate_catalog_random_numbers.py galacticus_catalog.hdf5
+python scripts/calculate_catalog_random_numbers.py galacticus_catalog.hdf5
 
 # Generate 10 random numbers per galaxy with specific seed
-python calculate_catalog_random_numbers.py galacticus_catalog.hdf5 \
+python scripts/calculate_catalog_random_numbers.py galacticus_catalog.hdf5 \
     --n-random 10 --seed 42
 
 # Save to separate file instead
-python calculate_catalog_random_numbers.py galacticus_catalog.hdf5 \
+python scripts/calculate_catalog_random_numbers.py galacticus_catalog.hdf5 \
     --save-to-file random_numbers.hdf5
 
 # Test with limited galaxies
-python calculate_catalog_random_numbers.py galacticus_catalog.hdf5 \
+python scripts/calculate_catalog_random_numbers.py galacticus_catalog.hdf5 \
     --max-galaxies 100
 ```
 
@@ -196,25 +232,25 @@ with h5py.File('galacticus_catalog_with_random.hdf5', 'r') as f:
 
 Run tests with unittest:
 ```bash
-python -m unittest test_SEDfromSFH
-python -m unittest test_coordinates
-python -m unittest test_random_numbers
+python -m unittest tests.test_SEDfromSFH
+python -m unittest tests.test_coordinates
+python -m unittest tests.test_random_numbers
 ```
 
 ## Performance Profiling
 
-The repository includes comprehensive profiling tools to analyze SED generation performance. See [PROFILING.md](PROFILING.md) for detailed documentation.
+The repository includes comprehensive profiling tools to analyze SED generation performance. See [docs/PROFILING.md](docs/PROFILING.md) for detailed documentation.
 
 Quick start:
 ```bash
 # Profile 100 galaxies
-python profile_sed_generation.py --num-galaxies 100
+python profiling/profile_sed_generation.py --num-galaxies 100
 
 # Analyze component-level performance
-python profile_sed_generation.py --component-profile --galaxy-index 8
+python profiling/profile_sed_generation.py --component-profile --galaxy-index 8
 
 # Detailed function-level profiling
-python profile_sed_generation.py --num-galaxies 50 --detailed-profile --output-file results.txt
+python profiling/profile_sed_generation.py --num-galaxies 50 --detailed-profile --output-file results.txt
 ```
 
 Current performance: ~130 ms per galaxy (faster than 0.2 s/galaxy target).
@@ -224,7 +260,7 @@ Current performance: ~130 ms per galaxy (faster than 0.2 s/galaxy target).
 For even better performance, use `use_synphot=False` in `evaluate_component_spectrum()`:
 ```bash
 # Compare performance between synphot and fast path
-python test_performance_comparison.py
+python tests/test_performance_comparison.py
 ```
 
 This approach is **2.3x faster** (10.4 ms vs 24.2 ms per galaxy) while producing numerically identical results.

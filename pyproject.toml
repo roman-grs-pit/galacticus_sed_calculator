@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "galacticus_sed_calculator"
+version = "0.1.0"
+description = "Classes and methods to generate spectra for galaxies simulated with Galacticus"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Andrew Robertson", email = "andrew.robertson@durham.ac.uk"}
+]
+keywords = ["astronomy", "galaxies", "spectroscopy", "galacticus"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "numpy",
+    "h5py",
+    "astropy",
+    "scipy",
+    "synphot",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+]
+scripts = [
+    "stpsf",  # Required for calculate_catalog_magnitudes.py
+]
+
+[project.urls]
+Homepage = "https://github.com/roman-grs-pit/galacticus_sed_calculator"
+Repository = "https://github.com/roman-grs-pit/galacticus_sed_calculator"
+
+[tool.setuptools]
+packages = ["galacticus_sed_calculator"]
+include-package-data = false
+
+# Note: Scripts in the scripts/ directory can be run directly with:
+#   python scripts/calculate_catalog_coordinates.py
+#   python scripts/calculate_catalog_magnitudes.py
+#   python scripts/calculate_catalog_random_numbers.py
