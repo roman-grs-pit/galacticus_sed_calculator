@@ -13,9 +13,9 @@ import time
 import os
 import sys
 
-# Add parent directory to path to import SEDfromSFH
+# Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from SEDfromSFH import sed_calculator
+from galacticus_sed_calculator import sed_calculator
 
 # Setup (do this once)
 example_dir = os.path.dirname(__file__)

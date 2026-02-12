@@ -12,12 +12,16 @@ import h5py
 import astropy.units as u
 from astropy.cosmology import FlatLambdaCDM
 import stpsf
-from SEDfromSFH import sed_calculator, detect_galacticus_format
 import time
 import shutil
 import os
 import argparse
 import sys
+
+# Add parent directory to path to import galacticus_sed_calculator
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from galacticus_sed_calculator import sed_calculator
+from galacticus_sed_calculator.sed_calculator import detect_galacticus_format
 
 # Default configuration
 DEFAULT_SED_TEMPLATE = "data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5"

@@ -14,11 +14,14 @@ generated at each output time for fixed-time catalogs.
 
 import numpy as np
 import h5py
-from SEDfromSFH import detect_galacticus_format
 import shutil
 import os
 import argparse
 import sys
+
+# Add parent directory to path to import galacticus_sed_calculator
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from galacticus_sed_calculator.sed_calculator import detect_galacticus_format
 
 
 def generate_random_numbers(n_galaxies, n_random=5, seed=None):

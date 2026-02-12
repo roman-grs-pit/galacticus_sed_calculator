@@ -13,11 +13,14 @@ import h5py
 import astropy.units as u
 from astropy.coordinates import SkyCoord, CartesianRepresentation
 from scipy.spatial.transform import Rotation
-from SEDfromSFH import detect_galacticus_format
 import shutil
 import os
 import argparse
 import sys
+
+# Add parent directory to path to import galacticus_sed_calculator
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from galacticus_sed_calculator.sed_calculator import detect_galacticus_format
 
 
 def convert_lightcone_to_radec(theta, phi, ra0=0.0, dec0=0.0, roll=0.0):

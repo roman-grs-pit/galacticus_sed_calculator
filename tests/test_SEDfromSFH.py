@@ -8,9 +8,9 @@ import sys
 import h5py
 import numpy as np
 
-# Add parent directory to path to import SEDfromSFH
+# Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from SEDfromSFH import sed_calculator
+from galacticus_sed_calculator import sed_calculator
 
 
 class TestSEDTemplateParameterExtraction(unittest.TestCase):

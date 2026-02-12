@@ -5,7 +5,9 @@ Classes and methods to generate spectra for galaxies simulated with Galacticus, 
 
 ```
 galacticus_sed_calculator/
-├── SEDfromSFH.py              # Main SED calculator module
+├── galacticus_sed_calculator/ # Main package directory
+│   ├── __init__.py            # Package initialization
+│   └── sed_calculator.py      # SED calculator module
 ├── scripts/                   # Command-line utilities
 │   ├── calculate_catalog_coordinates.py
 │   ├── calculate_catalog_magnitudes.py
@@ -52,7 +54,7 @@ For usage examples, see [exampleUsage.ipynb](examples/exampleUsage.ipynb).
 ### Basic Example
 
 ```python
-from SEDfromSFH import sed_calculator
+from galacticus_sed_calculator import sed_calculator
 import numpy as np
 import astropy.units as u
 
