@@ -23,7 +23,7 @@ import sys
 
 # Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from galacticus_sed_calculator import sed_calculator
+from galacticus_sed_calculator import SEDCalculator
 
 
 def profile_sed_generation(
@@ -74,7 +74,7 @@ def profile_sed_generation(
     # Initialize calculator (time this separately)
     print("\nInitializing SED calculator...")
     t0 = time.time()
-    sedCalc = sed_calculator(sed_template_filename)
+    sedCalc = SEDCalculator(sed_template_filename)
     init_time = time.time() - t0
     print(f"  Initialization time: {init_time:.4f} s")
     
@@ -268,7 +268,7 @@ def profile_sed_components(
     
     # Time: SED calculator initialization
     t0 = time.time()
-    sedCalc = sed_calculator(sed_template_filename)
+    sedCalc = SEDCalculator(sed_template_filename)
     component_times['init_calculator'] = time.time() - t0
     print(f"Initialize calculator: {component_times['init_calculator']:.4f} s")
     

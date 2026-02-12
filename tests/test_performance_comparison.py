@@ -13,7 +13,7 @@ import sys
 
 # Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from galacticus_sed_calculator import sed_calculator
+from galacticus_sed_calculator import SEDCalculator
 
 def test_performance():
     """Test and compare performance of synphot vs fast path."""
@@ -23,7 +23,7 @@ def test_performance():
     parent_dir = os.path.dirname(test_dir)
     sed_template_file = os.path.join(parent_dir, 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5')
     galacticus_file = os.path.join(parent_dir, 'data/romanUNIT.hdf5')
-    calc = sed_calculator(sed_template_file)
+    calc = SEDCalculator(sed_template_file)
     
     # Use a high-resolution wavelength grid to resolve emission lines
     wavelengths = np.linspace(8000, 30000, 2000) * u.AA

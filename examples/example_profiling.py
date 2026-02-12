@@ -15,7 +15,7 @@ import sys
 
 # Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from galacticus_sed_calculator import sed_calculator
+from galacticus_sed_calculator import SEDCalculator
 
 # Setup (do this once)
 example_dir = os.path.dirname(__file__)
@@ -25,7 +25,7 @@ galacticus_file = os.path.join(parent_dir, "data/romanUNIT-d1_4sqDeg_SFH_withMag
 
 print("Initializing SED calculator...")
 t0 = time.time()
-sedCalc = sed_calculator(sedTemplateFilename)
+sedCalc = SEDCalculator(sedTemplateFilename)
 init_time = time.time() - t0
 print(f"Initialization took {init_time:.4f} s\n")
 

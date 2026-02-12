@@ -20,7 +20,7 @@ import sys
 
 # Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from galacticus_sed_calculator import sed_calculator
+from galacticus_sed_calculator import SEDCalculator
 from galacticus_sed_calculator.sed_calculator import detect_galacticus_format
 
 # Default configuration
@@ -186,7 +186,7 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     print(f"\nInitializing SED calculator with template: {sed_template_file}")
     # Use UNIT cosmology since the catalog was generated with it
     unit_cosmo = FlatLambdaCDM(H0=67.74, Om0=0.3089)
-    calc = sed_calculator(sed_template_file, cosmology=unit_cosmo)
+    calc = SEDCalculator(sed_template_file, cosmology=unit_cosmo)
     
     # Set wavelength grid
     if obs_wavelengths is None:

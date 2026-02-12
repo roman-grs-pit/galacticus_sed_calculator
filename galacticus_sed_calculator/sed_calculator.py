@@ -316,7 +316,7 @@ def gaussian_from_fwhm(wav, lambda0, fwhm, fLine):
     
     return gaussian_emission_line(wav, lambda0, sigma, fLine)
 
-class sed_calculator:
+class SEDCalculator:
     def __init__(self, sedTemplateFilename, config=galacticus_sed_config, cosmology=Planck15):
         self.sedTemplateFilename = sedTemplateFilename
         self.load_sed_template()

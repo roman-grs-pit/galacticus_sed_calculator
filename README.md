@@ -72,12 +72,12 @@ For usage examples, see [exampleUsage.ipynb](examples/exampleUsage.ipynb).
 ### Basic Example
 
 ```python
-from galacticus_sed_calculator import sed_calculator
+from galacticus_sed_calculator import SEDCalculator
 import numpy as np
 import astropy.units as u
 
 # Initialize calculator with SED template
-calc = sed_calculator('sed_template.hdf5')
+calc = SEDCalculator('sed_template.hdf5')
 
 # Works with both lightcone and fixed-time formats!
 galData = calc.read_galacticus_galaxy('galacticus_output.hdf5', galIndex=0)

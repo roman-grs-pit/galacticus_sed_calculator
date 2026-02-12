@@ -10,7 +10,7 @@ import numpy as np
 
 # Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-from galacticus_sed_calculator import sed_calculator
+from galacticus_sed_calculator import SEDCalculator
 
 
 class TestSEDTemplateParameterExtraction(unittest.TestCase):
@@ -23,7 +23,7 @@ class TestSEDTemplateParameterExtraction(unittest.TestCase):
         parent_dir = os.path.dirname(test_dir)
         self.sed_template_file = os.path.join(parent_dir, 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5')
         self.galacticus_file = os.path.join(parent_dir, 'data/romanUNIT.hdf5')
-        self.calc = sed_calculator(self.sed_template_file)
+        self.calc = SEDCalculator(self.sed_template_file)
     
     def test_get_sed_template_parameters(self):
         """Test that SED template parameters are correctly extracted."""
@@ -69,7 +69,7 @@ class TestSFHCompatibilityValidation(unittest.TestCase):
         parent_dir = os.path.dirname(test_dir)
         self.sed_template_file = os.path.join(parent_dir, 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5')
         self.galacticus_file = os.path.join(parent_dir, 'data/romanUNIT.hdf5')
-        self.calc = sed_calculator(self.sed_template_file)
+        self.calc = SEDCalculator(self.sed_template_file)
     
     def test_compatible_files_pass_validation(self):
         """Test that compatible SED template and SFH pass validation."""
@@ -178,7 +178,7 @@ class TestIntegrationWithEvaluateComponentSpectrum(unittest.TestCase):
         """Set up test fixtures."""
         self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.galacticus_file = 'data/romanUNIT.hdf5'
-        self.calc = sed_calculator(self.sed_template_file)
+        self.calc = SEDCalculator(self.sed_template_file)
     
     def test_evaluate_component_spectrum_validates_compatibility(self):
         """Test that evaluate_component_spectrum validates compatibility."""
@@ -223,7 +223,7 @@ class TestCalculateMagnitudes(unittest.TestCase):
         """Set up test fixtures."""
         self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.galacticus_file = 'data/romanUNIT.hdf5'
-        self.calc = sed_calculator(self.sed_template_file)
+        self.calc = SEDCalculator(self.sed_template_file)
     
     def test_calculate_magnitudes_method_exists(self):
         """Test that calculate_magnitudes method exists and has correct signature."""
@@ -389,7 +389,7 @@ class TestFixedTimeFormat(unittest.TestCase):
         """Set up test fixtures including a fixed-time format test file."""
         self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.lightcone_file = 'data/romanUNIT.hdf5'
-        self.calc = sed_calculator(self.sed_template_file)
+        self.calc = SEDCalculator(self.sed_template_file)
         
         # Create a fixed-time format test file
         self.fixed_time_file = None
@@ -584,7 +584,7 @@ class TestFixedTimeFormat(unittest.TestCase):
                 diskSFH.attrs['time'] = times
             
             # Should not raise an exception with fixed-time parameter names and matching times
-            calc = sed_calculator(tmp_sed_filename)
+            calc = SEDCalculator(tmp_sed_filename)
             calc.validate_sfh_compatibility(tmp_gal_filename)
             
         finally:
@@ -600,7 +600,7 @@ class TestSEDTemplateFormats(unittest.TestCase):
     def test_lightcone_sed_template(self):
         """Test that lightcone SED templates (with /ages) load correctly."""
         sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-        calc = sed_calculator(sed_template_file)
+        calc = SEDCalculator(sed_template_file)
         
         # Check format was detected correctly
         self.assertEqual(calc.sedTemplateFormat, 'lightcone')
@@ -644,7 +644,7 @@ class TestSEDTemplateFormats(unittest.TestCase):
                 dst.create_dataset('wavelength', data=wavelength)
             
             # Load and test
-            calc = sed_calculator(tmp_filename)
+            calc = SEDCalculator(tmp_filename)
             
             # Check format was detected correctly
             self.assertEqual(calc.sedTemplateFormat, 'fixed-time')
@@ -689,7 +689,7 @@ class TestSEDTemplateFormats(unittest.TestCase):
             
             # Should raise ValueError
             with self.assertRaises(ValueError) as context:
-                sed_calculator(tmp_filename)
+                SEDCalculator(tmp_filename)
             
             self.assertIn('ages', str(context.exception))
             self.assertIn('time', str(context.exception))
@@ -708,7 +708,7 @@ class TestFormatValidation(unittest.TestCase):
         
         # Use existing lightcone SED template
         sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-        calc = sed_calculator(sed_template_file)
+        calc = SEDCalculator(sed_template_file)
         
         with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
             tmp_filename = tmp.name
@@ -740,7 +740,7 @@ class TestFormatValidation(unittest.TestCase):
         import tempfile
         
         sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-        calc = sed_calculator(sed_template_file)
+        calc = SEDCalculator(sed_template_file)
         
         with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
             tmp_filename = tmp.name
@@ -822,7 +822,7 @@ class TestFormatValidation(unittest.TestCase):
                 diskSFH.attrs['time'] = times  # Same times as SED template
             
             # Should pass
-            calc = sed_calculator(tmp_sed_filename)
+            calc = SEDCalculator(tmp_sed_filename)
             calc.validate_sfh_compatibility(tmp_gal_filename)
             
         finally:
@@ -881,7 +881,7 @@ class TestFormatValidation(unittest.TestCase):
                 diskSFH.attrs['time'] = different_times  # Different times
             
             # Should fail with time array mismatch
-            calc = sed_calculator(tmp_sed_filename)
+            calc = SEDCalculator(tmp_sed_filename)
             with self.assertRaises(ValueError) as context:
                 calc.validate_sfh_compatibility(tmp_gal_filename)
             
@@ -901,7 +901,7 @@ class TestFastSEDGeneration(unittest.TestCase):
         """Set up test fixtures."""
         self.sed_template_file = 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
         self.galacticus_file = 'data/romanUNIT.hdf5'
-        self.calc = sed_calculator(self.sed_template_file)
+        self.calc = SEDCalculator(self.sed_template_file)
     
     def test_use_synphot_parameter_exists(self):
         """Test that use_synphot parameter is accepted."""
