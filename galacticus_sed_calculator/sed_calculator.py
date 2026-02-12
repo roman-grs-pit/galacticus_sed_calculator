@@ -954,7 +954,6 @@ class SEDCalculator:
                 with h5py.File(filename, 'r') as f:
                     # Detect format to get proper paths
                     if filename not in self._file_formats:
-                        from .sed_calculator import detect_galacticus_format
                         format_type, base_path = detect_galacticus_format(filename)
                         self._file_formats[filename] = (format_type, base_path)
                     else:

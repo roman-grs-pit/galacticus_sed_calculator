@@ -59,8 +59,8 @@ def dust_attenuation_gb10_generalised(stellar_mass, redshift, delta_0, delta_z, 
     
     References
     ----------
-    Garn, T., & Best, P. N. (2010). "The relation between star formation, morphology, 
-    and local density in the EAGLE simulation." MNRAS, 409, 421.
+    Garn, T., & Best, P. N. (2010). "The dust attenuation law in distant galaxies: 
+    evidence for variation with spectral type." MNRAS, 409, 421.
     
     Examples
     --------
