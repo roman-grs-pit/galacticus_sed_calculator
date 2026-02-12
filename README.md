@@ -1,6 +1,24 @@
 # galacticus_sed_calculator
 Classes and methods to generate spectra for galaxies simulated with Galacticus, based on a saved star formation history.
 
+## Installation
+
+Install the package in editable mode for development:
+
+```bash
+pip install -e .
+```
+
+Or install with optional dependencies:
+
+```bash
+# For running the scripts
+pip install -e ".[scripts]"
+
+# For development and testing
+pip install -e ".[dev]"
+```
+
 ## Repository Structure
 
 ```
