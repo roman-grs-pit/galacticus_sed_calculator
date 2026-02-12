@@ -67,7 +67,7 @@ def test_performance():
     times_fast = []
     for i in range(num_galaxies):
         start = time.time()
-        wav, flux = calc.evaluate_component_spectrum(
+        spectrum = calc.evaluate_component_spectrum(
             galacticus_file,
             galIndex=i,
             component='disk',

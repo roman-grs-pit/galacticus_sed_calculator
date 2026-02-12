@@ -54,25 +54,26 @@ def main():
     # Example 2: Using fast path (no synphot)
     print("Example 2: Using fast path (use_synphot=False)")
     print("-" * 70)
-    wav, flux = calc.evaluate_component_spectrum(
+    spectrum_fast = calc.evaluate_component_spectrum(
         galacticus_file,
         galIndex=0,
         component='disk',
         obs_wavelengths=wavelengths,
         include_emission_lines=True,
-        use_synphot=False  # Enable fast path
+        use_synphot=False  # Enable fast path - uses numpy internally but still returns SourceSpectrum
     )
-    print(f"Result type: tuple of ({type(wav).__name__}, {type(flux).__name__})")
-    print(f"Wavelength shape: {wav.shape}, units: {wav.unit}")
-    print(f"Flux shape: {flux.shape}, units: {flux.unit}")
-    print(f"Flux at 15000 Å: {flux[700]}")
+    print(f"Result type: {type(spectrum_fast)}")
+    print(f"Spectrum has waveset: {hasattr(spectrum_fast, 'waveset')}")
+    # Evaluate at some wavelengths
+    flux_fast = spectrum_fast(wavelengths, flux_unit='FNU')
+    print(f"Flux at 15000 Å: {flux_fast[700]}")
     print()
     
     # Example 3: Verify results are identical
     print("Example 3: Verifying results match")
     print("-" * 70)
     flux_synphot_val = flux_synphot.to_value(u.Lsun / (u.Hz * u.Mpc**2))
-    flux_fast_val = flux.to_value(u.Lsun / (u.Hz * u.Mpc**2))
+    flux_fast_val = flux_fast.to_value(u.Lsun / (u.Hz * u.Mpc**2))
     
     max_diff = np.max(np.abs(flux_synphot_val - flux_fast_val))
     relative_diff = max_diff / np.max(flux_synphot_val)
@@ -92,7 +93,9 @@ def main():
     print()
     print("Use fast path (use_synphot=False) when:")
     print("  • Processing many galaxies (batch operations)")
-    print("  • You just need flux arrays for analysis or plotting")
+    print("  • You want faster computation (~2-4x speedup)")
+    print("  • Internal numpy operations are faster than synphot's spectrum handling")
+    print("  • Still returns SourceSpectrum for API consistency")
     print("  • Performance is critical (~2.3x speedup)")
     print("  • You control the wavelength grid (high enough to resolve lines)")
     print()

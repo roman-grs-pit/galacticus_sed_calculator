@@ -917,9 +917,10 @@ class TestFastSEDGeneration(unittest.TestCase):
         )
         self.assertIsNotNone(spectrum)
     
-    def test_use_synphot_false_returns_tuple(self):
-        """Test that use_synphot=False returns a tuple."""
+    def test_use_synphot_false_returns_sourcespectrum(self):
+        """Test that use_synphot=False returns a SourceSpectrum (same as use_synphot=True)."""
         import astropy.units as u
+        from synphot import SourceSpectrum
         wavelengths = np.linspace(10000, 20000, 100) * u.AA
         result = self.calc.evaluate_component_spectrum(
             self.galacticus_file,
@@ -928,14 +929,11 @@ class TestFastSEDGeneration(unittest.TestCase):
             obs_wavelengths=wavelengths,
             use_synphot=False
         )
-        # Should return a tuple
-        self.assertIsInstance(result, tuple)
-        self.assertEqual(len(result), 2)
-        
-        # Check that both elements are quantities with proper units
-        wav, flux = result
-        self.assertIsInstance(wav, u.Quantity)
-        self.assertIsInstance(flux, u.Quantity)
+        # Should return a SourceSpectrum object, not a tuple
+        self.assertIsInstance(result, SourceSpectrum)
+        # Verify it has the expected methods
+        self.assertTrue(hasattr(result, 'waveset'))
+        self.assertTrue(callable(result))
     
     def test_use_synphot_false_requires_wavelengths(self):
         """Test that use_synphot=False requires obs_wavelengths."""
@@ -967,7 +965,7 @@ class TestFastSEDGeneration(unittest.TestCase):
         )
         
         # Get spectrum with fast path
-        wav_fast, flux_fast = self.calc.evaluate_component_spectrum(
+        spectrum_fast = self.calc.evaluate_component_spectrum(
             self.galacticus_file,
             galIndex=0,
             component='disk',
@@ -976,8 +974,9 @@ class TestFastSEDGeneration(unittest.TestCase):
             use_synphot=False
         )
         
-        # Evaluate synphot spectrum at the same wavelengths
+        # Evaluate both spectra at the same wavelengths
         flux_synphot = spectrum_synphot(wavelengths, flux_unit='FNU')
+        flux_fast = spectrum_fast(wavelengths, flux_unit='FNU')
         
         # Convert to same units for comparison
         flux_synphot_val = flux_synphot.to_value(u.Lsun / (u.Hz * u.Mpc**2))
@@ -989,12 +988,13 @@ class TestFastSEDGeneration(unittest.TestCase):
     def test_fast_path_with_emission_lines(self):
         """Test that fast path works with emission lines."""
         import astropy.units as u
+        from synphot import SourceSpectrum
         
         # Use a fine wavelength grid to resolve emission lines
         wavelengths = np.linspace(8000, 30000, 2000) * u.AA
         
         # Get spectrum with emission lines
-        wav_fast, flux_fast = self.calc.evaluate_component_spectrum(
+        spectrum_fast = self.calc.evaluate_component_spectrum(
             self.galacticus_file,
             galIndex=0,
             component='disk',
@@ -1003,9 +1003,11 @@ class TestFastSEDGeneration(unittest.TestCase):
             use_synphot=False
         )
         
-        # Check that we got results
-        self.assertEqual(len(wav_fast), len(wavelengths))
-        self.assertEqual(len(flux_fast), len(wavelengths))
+        # Should return a SourceSpectrum
+        self.assertIsInstance(spectrum_fast, SourceSpectrum)
+        
+        # Evaluate at wavelengths
+        flux_fast = spectrum_fast(wavelengths, flux_unit='FNU')
         
         # Flux should be non-negative
         self.assertTrue(np.all(flux_fast.value >= 0))
@@ -1046,13 +1048,14 @@ class TestFastSEDGeneration(unittest.TestCase):
     def test_line_metadata_caching(self):
         """Test that emission line metadata is properly cached."""
         import astropy.units as u
+        from synphot import SourceSpectrum
         
         wavelengths = np.linspace(10000, 20000, 100) * u.AA
         
         # First call should populate cache
         self.assertNotIn((self.galacticus_file, 'disk'), self.calc._line_metadata_cache)
         
-        wav1, flux1 = self.calc.evaluate_component_spectrum(
+        spectrum1 = self.calc.evaluate_component_spectrum(
             self.galacticus_file,
             galIndex=0,
             component='disk',
@@ -1060,6 +1063,9 @@ class TestFastSEDGeneration(unittest.TestCase):
             include_emission_lines=True,
             use_synphot=False
         )
+        
+        # Should return SourceSpectrum
+        self.assertIsInstance(spectrum1, SourceSpectrum)
         
         # Cache should now be populated
         self.assertIn((self.galacticus_file, 'disk'), self.calc._line_metadata_cache)
@@ -1077,7 +1083,7 @@ class TestFastSEDGeneration(unittest.TestCase):
         # Second call should reuse cache (same object reference)
         cached_data = self.calc._line_metadata_cache[(self.galacticus_file, 'disk')]
         
-        wav2, flux2 = self.calc.evaluate_component_spectrum(
+        spectrum2 = self.calc.evaluate_component_spectrum(
             self.galacticus_file,
             galIndex=1,
             component='disk',
