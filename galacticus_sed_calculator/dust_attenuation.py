@@ -10,100 +10,132 @@ dust extinction varies with wavelength (e.g., Calzetti law).
 import numpy as np
 import astropy.units as u
 import astropy.constants as const
+from typing import Union, List, Optional, Tuple, Callable
 
 
-def dust_attenuation_gb10_generalised(stellar_mass, redshift, delta_0, delta_z, delta_M, delta_Mz, attenuation_scatter=0.0):
+def dust_attenuation_garnBest10(
+    Mstar: np.ndarray, 
+    attenuation_scatter: float = 0.0,
+    random_uniform: Optional[np.ndarray] = None
+) -> np.ndarray:
     """
-    Calculate dust attenuation at H-alpha wavelength using the generalized GB10 model.
+    Calculate H-alpha dust attenuation following Garn & Best (2010).
     
-    This function implements a generalized version of the Garn & Best (2010) dust attenuation
-    model, which predicts the amount of dust attenuation at the H-alpha emission line wavelength
-    based on galaxy stellar mass and redshift.
-    
-    The model follows the parametric form:
-        A(H-alpha) = delta_0 + delta_z * z + delta_M * log10(M*/M_sun) + delta_Mz * z * log10(M*/M_sun)
-    
-    Optionally, a log-normal scatter can be added to the attenuation values.
+    This is the mean relationship between stellar mass and H-alpha dust 
+    attenuation from https://ui.adsabs.harvard.edu/abs/2010MNRAS.409..421G
     
     Parameters
     ----------
-    stellar_mass : float or array-like
-        Stellar mass of the galaxy in solar masses (M_sun). Can be a scalar or array.
-    redshift : float or array-like
-        Redshift of the galaxy. Can be a scalar or array.
-    delta_0 : float
-        Constant offset term in the attenuation relation.
-    delta_z : float
-        Coefficient for the redshift dependence.
-    delta_M : float
-        Coefficient for the stellar mass dependence.
-    delta_Mz : float
-        Coefficient for the coupled mass-redshift dependence.
+    Mstar : np.ndarray
+        Stellar mass in solar masses
     attenuation_scatter : float, optional
-        Log-normal scatter to add to the attenuation values (in magnitudes).
-        If 0 (default), no scatter is added. If non-zero, random scatter is drawn
-        from a normal distribution with this standard deviation.
-    
+        Scatter in the attenuation relation (in magnitudes). Default is 0.0.
+        When non-zero, adds Gaussian scatter to the mean relation.
+    random_uniform : np.ndarray, optional
+        Pre-saved random uniform(0,1) numbers for each galaxy. If provided,
+        these are used to generate reproducible scatter via inverse CDF.
+        If None and scatter > 0, uses np.random.randn().
+        
     Returns
     -------
-    A_Halpha : float or array-like
-        Dust attenuation at H-alpha wavelength in magnitudes. Returns the same shape
-        as the input stellar_mass and redshift arrays.
-    
-    Notes
-    -----
-    The original Garn & Best (2010) model was calibrated using SDSS galaxies and
-    provides a simple parametric description of how dust attenuation correlates with
-    galaxy properties. The generalized version allows for flexible parameterization
-    through the delta coefficients.
-    
-    References
-    ----------
-    Garn, T., & Best, P. N. (2010). "The dust attenuation law in distant galaxies: 
-    evidence for variation with spectral type." MNRAS, 409, 421.
-    
-    Examples
-    --------
-    >>> # Calculate attenuation for a single galaxy
-    >>> stellar_mass = 1e10  # M_sun
-    >>> redshift = 0.1
-    >>> A_Ha = dust_attenuation_gb10_generalised(stellar_mass, redshift, 
-    ...                                           delta_0=0.275, delta_z=-1.614, 
-    ...                                           delta_M=-0.834, delta_Mz=-0.708)
-    
-    >>> # Calculate for multiple galaxies with scatter
-    >>> masses = np.array([1e9, 1e10, 1e11])
-    >>> redshifts = np.array([0.1, 0.5, 1.0])
-    >>> A_Ha = dust_attenuation_gb10_generalised(masses, redshifts,
-    ...                                           delta_0=0.275, delta_z=-1.614,
-    ...                                           delta_M=-0.834, delta_Mz=-0.708,
-    ...                                           attenuation_scatter=0.25)
+    np.ndarray
+        H-alpha attenuation in magnitudes (A_Halpha)
     """
-    # Convert inputs to numpy arrays for consistent handling
-    stellar_mass = np.atleast_1d(stellar_mass)
-    redshift = np.atleast_1d(redshift)
+    X = np.log10(Mstar / 1e10)
+    A_Halpha = 0.91 + 0.77 * X + 0.11 * X**2 - 0.09 * X**3
     
-    # Calculate log10 of stellar mass
-    log_stellar_mass = np.log10(stellar_mass)
-    
-    # Calculate mean attenuation using the parametric model
-    A_Halpha = (delta_0 + 
-                delta_z * redshift + 
-                delta_M * log_stellar_mass + 
-                delta_Mz * redshift * log_stellar_mass)
-    
-    # Add scatter if specified
+    # Add scatter if requested
     if attenuation_scatter > 0:
-        # Draw random values from a normal distribution
-        scatter = np.random.normal(0, attenuation_scatter, size=A_Halpha.shape)
-        A_Halpha += scatter
+        if random_uniform is not None:
+            # Convert uniform(0,1) to standard normal via inverse CDF
+            from scipy.stats import norm
+            random_normal = norm.ppf(random_uniform)
+            A_Halpha = A_Halpha + random_normal * attenuation_scatter
+        else:
+            A_Halpha = A_Halpha + np.random.randn(len(X)) * attenuation_scatter
     
-    # Ensure attenuation is non-negative
+    return A_Halpha
+
+
+def dust_attenuation_gb10_generalised(
+    Mstar: np.ndarray,
+    z: np.ndarray,
+    *,
+    delta_0: float = 0.0,
+    delta_M: float = 0.0,
+    delta_z: float = 0.0,
+    delta_Mz: float = 0.0,
+    z_pivot: float = 1.0,
+    attenuation_scatter: float = 0.0,
+    rng: np.random.Generator | None = None,
+    random_uniform: Optional[np.ndarray] = None,
+) -> np.ndarray:
+    """
+    H-alpha dust attenuation based on Garn & Best (2010), with a flexible
+    separable correction in stellar mass and redshift.
+
+    Parameters
+    ----------
+    Mstar : np.ndarray
+        Stellar mass in solar masses.
+    z : np.ndarray
+        Redshift.
+    delta_0 : float, optional
+        Global additive offset in magnitudes.
+    delta_M : float, optional
+        Mass-dependent tilt (per dex in Mstar).
+    delta_z : float, optional
+        Redshift-dependent offset.
+    delta_Mz : float, optional
+        Cross-term: mass-dependent redshift evolution.
+    z_pivot : float, optional
+        Pivot redshift for the redshift coordinate.
+    attenuation_scatter : float, optional
+        Gaussian scatter in magnitudes added after all corrections.
+    rng : np.random.Generator, optional
+        Random number generator for reproducibility. Ignored if random_uniform is provided.
+    random_uniform : np.ndarray, optional
+        Pre-saved random uniform(0,1) numbers for each galaxy. If provided,
+        these are used to generate reproducible scatter via inverse CDF.
+        If None and scatter > 0, uses rng or np.random.default_rng().
+
+    Returns
+    -------
+    np.ndarray
+        H-alpha attenuation in magnitudes (A_Halpha), clipped to >= 0.
+    """
+
+    # --- GB10 baseline ---
+    X = np.log10(Mstar / 1e10)
+    A_gb10 = 0.91 + 0.77 * X + 0.11 * X**2 - 0.09 * X**3
+
+    # --- Redshift coordinate ---
+    u = np.log(1+z) - np.log(1+z_pivot)
+
+    # --- Modified attenuation ---
+    A_Halpha = (
+        A_gb10
+        + delta_0
+        + delta_M * X
+        + delta_z * u
+        + delta_Mz * X * u
+    )
+
+    # --- Optional scatter ---
+    if attenuation_scatter > 0:
+        if random_uniform is not None:
+            # Convert uniform(0,1) to standard normal via inverse CDF
+            from scipy.stats import norm
+            random_normal = norm.ppf(random_uniform)
+            A_Halpha = A_Halpha + random_normal * attenuation_scatter
+        else:
+            if rng is None:
+                rng = np.random.default_rng()
+            A_Halpha = A_Halpha + rng.normal(0.0, attenuation_scatter, size=len(X))
+
+    # --- Enforce physical floor ---
     A_Halpha = np.maximum(A_Halpha, 0.0)
-    
-    # Return scalar if input was scalar
-    if A_Halpha.size == 1:
-        return float(A_Halpha[0])
+
     return A_Halpha
 
 
@@ -285,7 +317,8 @@ def apply_dust_attenuation_to_line(line_flux, line_wavelength, A_Halpha, dust_la
 
 def _calzetti_k_lambda(wavelength_AA):
     """
-    Calculate the k(lambda) value for the Calzetti attenuation law.
+    Calculate the k(lambda) value for the Calzetti attenuation law. See (for example)
+    equation 1.20 from https://ned.ipac.caltech.edu/level5/Sept12/Calzetti/paper.pdf
     
     This is a helper function used internally to compute the Calzetti k(lambda)
     value at a specific wavelength.
