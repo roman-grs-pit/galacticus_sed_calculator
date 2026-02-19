@@ -1062,7 +1062,8 @@ class SEDCalculator:
     
     def calculate_magnitudes(self, filename, galIndex, bandpasses, component='total', 
                             magnitude_system='AB', obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA,
-                            includeAGN=True, lineFWHM=10*u.AA):
+                            includeAGN=True, lineFWHM=10*u.AA, dust_model=None, dust_params=None,
+                            dust_law='calzetti', random_uniform_index=None):
         """
         Calculate observed magnitudes for a galaxy in multiple bandpasses.
         
@@ -1100,6 +1101,28 @@ class SEDCalculator:
         lineFWHM : Quantity, optional
             Full width at half maximum of emission lines.
             Default is 10 Angstroms.
+        dust_model : str, optional
+            Name of the dust attenuation model to use for emission lines. Currently supported:
+            - 'gb10_generalised': Generalized Garn & Best (2010) model
+            - None: No dust attenuation applied (default)
+        dust_params : dict, optional
+            Dictionary of parameters for the dust model. Required if dust_model is not None.
+            For 'gb10_generalised' model, expected parameters are:
+            - 'delta_0': Constant offset term
+            - 'delta_z': Redshift coefficient
+            - 'delta_M': Stellar mass coefficient
+            - 'delta_Mz': Mass-redshift coupling coefficient
+            - 'attenuation_scatter': Log-normal scatter (optional, default 0.0)
+            Example: {'delta_0': 0.275, 'delta_z': -1.614, 'delta_M': -0.834, 
+                      'delta_Mz': -0.708, 'attenuation_scatter': 0.25}
+        dust_law : str, optional
+            Name of the dust attenuation law describing wavelength dependence.
+            Currently only 'calzetti' is supported. Default is 'calzetti'.
+        random_uniform_index : int, optional
+            Index to select from the randomUniform dataset in the HDF5 file.
+            If provided, the random number at randomUniform[galIndex, random_uniform_index]
+            will be used for dust attenuation scatter. If None, scatter is generated
+            using numpy's random number generator. Default is None.
         
         Returns
         -------
@@ -1138,12 +1161,20 @@ class SEDCalculator:
             spectrum = self.evaluate_total_spectrum(filename, galIndex, 
                                                     includeAGN=includeAGN,
                                                     obs_wavelengths=obs_wavelengths,
-                                                    lineFWHM=lineFWHM)
+                                                    lineFWHM=lineFWHM,
+                                                    dust_model=dust_model,
+                                                    dust_params=dust_params,
+                                                    dust_law=dust_law,
+                                                    random_uniform_index=random_uniform_index)
         elif component in ['disk', 'spheroid', 'AGN']:
             spectrum = self.evaluate_component_spectrum(filename, galIndex,
                                                         component=component,
                                                         obs_wavelengths=obs_wavelengths,
-                                                        lineFWHM=lineFWHM)
+                                                        lineFWHM=lineFWHM,
+                                                        dust_model=dust_model,
+                                                        dust_params=dust_params,
+                                                        dust_law=dust_law,
+                                                        random_uniform_index=random_uniform_index)
         else:
             raise ValueError(f"Invalid component '{component}'. Must be 'disk', 'spheroid', 'AGN', or 'total'.")
         
