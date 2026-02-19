@@ -942,7 +942,6 @@ class SEDCalculator:
         else:
             # For non-synphot path, we'll accumulate flux in Fnu units
             total_Fnu = continuum_Fnu.copy()
-        
         # Calculate dust attenuation if a dust model is specified
         A_Halpha = None
         if dust_model is not None:
@@ -972,18 +971,9 @@ class SEDCalculator:
                     spheroid_mass = f[spheroid_mass_path][galIndex] if spheroid_mass_path in f else 0.0
                     total_stellar_mass = disk_mass + spheroid_mass
                 
-                # Extract dust model parameters
-                delta_0 = dust_params.get('delta_0', 0.0)
-                delta_z = dust_params.get('delta_z', 0.0)
-                delta_M = dust_params.get('delta_M', 0.0)
-                delta_Mz = dust_params.get('delta_Mz', 0.0)
-                attenuation_scatter = dust_params.get('attenuation_scatter', 0.0)
-                
                 # Calculate dust attenuation at H-alpha
                 A_Halpha = dust_attenuation_gb10_generalised(
-                    total_stellar_mass, redshift,
-                    delta_0, delta_z, delta_M, delta_Mz,
-                    attenuation_scatter
+                    total_stellar_mass, redshift, **dust_params
                 )
             else:
                 raise ValueError(f"Dust model '{dust_model}' not supported. Currently only 'gb10_generalised' is implemented.")
