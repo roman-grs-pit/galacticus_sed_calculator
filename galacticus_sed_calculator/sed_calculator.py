@@ -1061,7 +1061,7 @@ class SEDCalculator:
         return total_spectrum
     
     def calculate_magnitudes(self, filename, galIndex, bandpasses, component='total', 
-                            magnitude_system='AB', obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA,
+                            magnitude_system='AB', obs_wavelengths=np.linspace(3000, 30000, 1000)*u.AA,
                             includeAGN=True, lineFWHM=10*u.AA, dust_model=None, dust_params=None,
                             dust_law='calzetti', random_uniform_index=None):
         """
