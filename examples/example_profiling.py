@@ -32,7 +32,7 @@ print(f"Initialization took {init_time:.4f} s\n")
 obs_wavelengths = np.linspace(0.4, 2.5, 1000) * u.micron
 
 # Profile a few galaxies
-num_galaxies_to_test = 20
+num_galaxies_to_test = 100
 print(f"Profiling {num_galaxies_to_test} galaxies...")
 print("-" * 60)
 
