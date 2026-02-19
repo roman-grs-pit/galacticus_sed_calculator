@@ -1,0 +1,116 @@
+"""
+Example demonstrating dust attenuation for emission lines.
+
+This example shows how to apply dust attenuation when generating galaxy spectra
+using the generalized GB10 (Garn & Best 2010) model and Calzetti attenuation law.
+"""
+import numpy as np
+import astropy.units as u
+# import SEDfromSFH as sed - have changed structure of repository so this is now imported from galacticus_sed_calculator
+from galacticus_sed_calculator import SEDCalculator
+import matplotlib.pyplot as plt
+from astropy.cosmology import FlatLambdaCDM
+
+# Initialize the SED calculator with a template file
+sed_template_file = '../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
+galacticus_file = '../data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5'
+unit = FlatLambdaCDM(H0=67.74, Om0=0.3089)
+sedCalc = SEDCalculator(sed_template_file, cosmology=unit)
+
+# Define wavelength range for the spectrum
+obs_wavelengths = np.linspace(0.5, 2.5, 1000)*u.micron #wavelengths to produce sed over
+high_res_wavelengths = np.linspace(1e4, 2e4, 5000)*u.angstrom
+
+# Parameters for the GB10 dust attenuation model
+dust_model = 'gb10_generalised'
+dust_params = {
+    'delta_0': 0.275,      
+    'delta_z': -1.614,    
+    'delta_M': -0.834,     
+    'delta_Mz': -0.708,    
+    'attenuation_scatter': 0.25  
+}
+dust_law='calzetti'
+
+# Select a galaxy to analyze
+galaxy_index = 1
+
+# Read galaxy properties
+galData = sedCalc.read_galacticus_galaxy(galacticus_file, galaxy_index)
+print(f"\nGalaxy {galaxy_index}:")
+print(f"Redshift: {galData['redshift']:.3f}")
+
+# Generate spectrum WITHOUT dust attenuation
+print("\nGenerating spectrum without dust attenuation...")
+spectrum_no_dust = sedCalc.evaluate_total_spectrum(galacticus_file, galaxy_index, 
+                        obs_wavelengths=obs_wavelengths,
+                        use_synphot=False)
+
+"""
+Note that there are two ways to add scatter in the amount of dust attenuation:
+1. Random scatter: Each time you generate the spectrum, a new random scatter value is drawn from a normal distribution with the specified standard deviation (attenuation_scatter). This means that if you run the code multiple times, you'll get different spectra each time due to the random nature of the scatter.
+2. Deterministic scatter using a random number from the Galacticus catalog: Instead of drawing a new random scatter value each time, you can use random numbers that are stored for each galaxy in the Galacticus catalog. This means that the scatter will be consistent for that particular galaxy each time you generate the spectrum, as it will always use the same random number from the catalog to determine the scatter. This catalog has 5 random numbers for each galaxy, so you can specify which one to use (e.g., random_uniform_index=2) to get a deterministic scatter value for that galaxy.
+"""
+
+# Generate spectrum WITH dust attenuation (random scatter)
+print("\nGenerating spectrum with dust attenuation (random scatter)...")
+spectrum_with_dust = sedCalc.evaluate_total_spectrum(galacticus_file, galaxy_index, 
+                        obs_wavelengths=obs_wavelengths,
+                        use_synphot=False,
+                        dust_model=dust_model, 
+                        dust_params=dust_params, 
+                        dust_law=dust_law)
+
+# Generate spectrum WITH dust attenuation (scatter using random number from Galacticus catalog)
+print("\nGenerating spectrum with dust attenuation (scatter using random number from Galacticus catalog)...")
+spectrum_with_dust_deterministic = sedCalc.evaluate_total_spectrum(galacticus_file, galaxy_index, 
+                        obs_wavelengths=obs_wavelengths, 
+                        use_synphot=False,
+                        dust_model=dust_model, 
+                        dust_params=dust_params, 
+                        dust_law=dust_law,
+                        random_uniform_index=2)
+
+
+# Extract flux arrays for plotting
+wavelengths_for_plot = np.linspace(8000, 30000, 2000) * u.AA
+flux_no_dust = spectrum_no_dust(wavelengths_for_plot, flux_unit='flam')
+flux_with_dust = spectrum_with_dust_deterministic(wavelengths_for_plot, flux_unit='flam')
+
+# Plot the comparison
+plt.figure(figsize=(12, 6))
+
+plt.subplot(2, 1, 1)
+plt.plot(wavelengths_for_plot, flux_no_dust, label='No dust', alpha=0.7, linewidth=1)
+plt.plot(wavelengths_for_plot, flux_with_dust, label='With dust (GB10)', alpha=0.7, linewidth=1)
+plt.xlabel('Observed Wavelength (Å)')
+plt.ylabel('Flux (erg/s/cm²/Å)')
+plt.title(f'Galaxy Spectrum Comparison (z={galData["redshift"]:.3f})')
+plt.legend()
+plt.grid(True, alpha=0.3)
+plt.yscale('log')
+
+# Plot the ratio (attenuation factor)
+plt.subplot(2, 1, 2)
+ratio = flux_no_dust / flux_with_dust
+plt.plot(wavelengths_for_plot, ratio, color='red', linewidth=1)
+plt.xlabel('Observed Wavelength (Å)')
+plt.ylabel('Flux Ratio (no dust / with dust)')
+plt.title('Dust Attenuation Effect')
+plt.grid(True, alpha=0.3)
+plt.axhline(y=1, color='gray', linestyle='--', alpha=0.5, label='No attenuation')
+plt.legend()
+
+plt.tight_layout()
+plt.savefig('dust_attenuation_example.png', dpi=150)
+print("\nPlot saved as 'dust_attenuation_example.png'")
+
+print("\n" + "=" * 70)
+print("Example complete!")
+print("\nYou can customize the dust model parameters:")
+print("  - delta_0: Constant offset")
+print("  - delta_z: Redshift dependence")
+print("  - delta_M: Stellar mass dependence")
+print("  - delta_Mz: Mass-redshift coupling")
+print("  - attenuation_scatter: normal scatter in attenuation (mags)")
+print("=" * 70)

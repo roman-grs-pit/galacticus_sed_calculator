@@ -7,6 +7,10 @@ import re
 import synphot
 from synphot.models import Empirical1D, GaussianFlux1D
 from synphot import units, SourceSpectrum
+from .dust_attenuation import (
+    dust_attenuation_gb10_generalised,
+    apply_dust_attenuation_to_line
+)
 #from specutils import Spectrum
 #from specutils.manipulation import FluxConservingResampler
 
@@ -799,7 +803,7 @@ class SEDCalculator:
         )
         return observed_sed
 
-    def evaluate_component_spectrum(self, filename, galIndex, component='disk', obs_wavelengths=None, include_emission_lines=True, lineFWHM=10*u.AA, minimumLineFlux=0, minimumLineWavelength = 0.9*u.micron, maximumLineWavelength = 2.03*u.micron, use_synphot=True):
+    def evaluate_component_spectrum(self, filename, galIndex, component='disk', obs_wavelengths=None, include_emission_lines=True, lineFWHM=10*u.AA, minimumLineFlux=0, minimumLineWavelength = 0.9*u.micron, maximumLineWavelength = 2.03*u.micron, use_synphot=True, dust_model=None, dust_params=None, dust_law='calzetti', random_uniform_index=None):
         """
         Evaluate the spectrum of a specified galaxy component.
 
@@ -845,6 +849,29 @@ class SEDCalculator:
             Whether to use synphot for spectrum generation. When True (default), returns a synphot.SourceSpectrum
             object. When False, uses direct numpy operations for faster performance and returns a tuple of
             (wavelength, flux_density) arrays. Default is True for backward compatibility.
+        dust_model : str, optional
+            Name of the dust attenuation model to use for emission lines. Currently supported:
+            - 'gb10_generalised': Generalized Garn & Best (2010) model
+            - None: No dust attenuation applied (default)
+        dust_params : dict, optional
+            Dictionary of parameters for the dust model. Required if dust_model is not None.
+            For 'gb10_generalised' model, expected parameters are:
+            - 'delta_0': Constant offset term
+            - 'delta_z': Redshift coefficient
+            - 'delta_M': Stellar mass coefficient
+            - 'delta_Mz': Mass-redshift coupling coefficient
+            - 'attenuation_scatter': Log-normal scatter (optional, default 0.0)
+            Example: {'delta_0': 0.275, 'delta_z': -1.614, 'delta_M': -0.834, 
+                      'delta_Mz': -0.708, 'attenuation_scatter': 0.25}
+        dust_law : str, optional
+            Name of the dust attenuation law describing wavelength dependence.
+            Currently only 'calzetti' is supported. Default is 'calzetti'.
+        random_uniform_index : int, optional
+            Index to select from the randomUniform dataset in the HDF5 file.
+            If provided, the random number at randomUniform[galIndex, random_uniform_index]
+            will be used for dust attenuation scatter. If None, scatter is generated
+            using numpy's random number generator. Default is None.
+            Example: random_uniform_index=2 uses the 3rd random number for each galaxy.
 
         Returns
         -------
@@ -921,6 +948,66 @@ class SEDCalculator:
         else:
             # For non-synphot path, we'll accumulate flux in Fnu units
             total_Fnu = continuum_Fnu.copy()
+        # Calculate dust attenuation if a dust model is specified
+        A_Halpha = None
+        if dust_model is not None:
+            if dust_params is None:
+                raise ValueError(f"dust_params must be provided when dust_model='{dust_model}'")
+            
+            if dust_model == 'gb10_generalised':
+                # Read stellar mass from the Galacticus file
+                with h5py.File(filename, 'r') as f:
+                    # Detect format to get proper paths
+                    if filename not in self._file_formats:
+                        format_type, base_path = detect_galacticus_format(filename)
+                        self._file_formats[filename] = (format_type, base_path)
+                    else:
+                        format_type, base_path = self._file_formats[filename]
+                    
+                    # Construct paths based on format
+                    if format_type == 'lightcone':
+                        disk_mass_path = f'{base_path}/nodeData/diskMassStellar'
+                        spheroid_mass_path = f'{base_path}/nodeData/spheroidMassStellar'
+                        random_uniform_path = f'{base_path}/nodeData/randomUniform'
+                    else:  # fixed-time
+                        disk_mass_path = f'{base_path}/nodeData/diskMassStellar'
+                        spheroid_mass_path = f'{base_path}/nodeData/spheroidMassStellar'
+                        random_uniform_path = f'{base_path}/nodeData/randomUniform'
+                    
+                    # Read stellar masses (in solar masses)
+                    disk_mass = f[disk_mass_path][galIndex] if disk_mass_path in f else 0.0
+                    spheroid_mass = f[spheroid_mass_path][galIndex] if spheroid_mass_path in f else 0.0
+                    total_stellar_mass = disk_mass + spheroid_mass
+                    
+                    # Read random uniform value if requested
+                    random_uniform_value = None
+                    if random_uniform_index is not None:
+                        if random_uniform_path in f:
+                            random_uniform_dataset = f[random_uniform_path]
+                            # Check if the index is valid
+                            if random_uniform_dataset.ndim == 2:
+                                if random_uniform_index < random_uniform_dataset.shape[1]:
+                                    random_uniform_value = random_uniform_dataset[galIndex, random_uniform_index]
+                                else:
+                                    raise ValueError(f"random_uniform_index={random_uniform_index} is out of bounds. "
+                                                   f"Dataset has {random_uniform_dataset.shape[1]} random numbers per galaxy.")
+                            else:
+                                raise ValueError(f"randomUniform dataset has unexpected shape: {random_uniform_dataset.shape}. "
+                                               f"Expected 2D array (Ngal x Nrand).")
+                        else:
+                            raise ValueError(f"random_uniform_index specified but {random_uniform_path} not found in file.")
+                
+                # Prepare dust_params with random_uniform if available
+                dust_params_copy = dust_params.copy()
+                if random_uniform_value is not None:
+                    dust_params_copy['random_uniform'] = np.array([random_uniform_value])
+                
+                # Calculate dust attenuation at H-alpha
+                A_Halpha = dust_attenuation_gb10_generalised(
+                    total_stellar_mass, redshift, **dust_params_copy
+                )
+            else:
+                raise ValueError(f"Dust model '{dust_model}' not supported. Currently only 'gb10_generalised' is implemented.")
         
         if include_emission_lines:
             minimumLineFlux = minFlux(minimumLineFlux)
@@ -932,10 +1019,16 @@ class SEDCalculator:
                 lineLuminosities = np.array([f[path][galIndex] for path in hdf5_paths])
             
             for lineName, lineRestWavelength, lineLuminosity in zip(lineNames, lineRestWavelengths, lineLuminosities):
-                lineWavelength = (lineRestWavelength * u.AA) * (1 + redshift)
+                lineRestWavelength = lineRestWavelength * u.AA
+                lineWavelength = lineRestWavelength * (1 + redshift)
                 if (lineWavelength < minimumLineWavelength) or (lineWavelength > maximumLineWavelength):
                     continue
                 lineFlux = lineLuminosity * (u.erg/u.s) / (4 * np.pi * (self.cosmo.luminosity_distance(redshift).to(u.cm))**2)
+                
+                # Apply dust attenuation if specified
+                if A_Halpha is not None:
+                    lineFlux = apply_dust_attenuation_to_line(lineFlux, lineRestWavelength, A_Halpha, dust_law=dust_law)
+                
                 if lineFlux <= minimumLineFlux:
                     continue
                 if use_synphot:
@@ -955,12 +1048,12 @@ class SEDCalculator:
         component_spectrum = total_flux
         return component_spectrum
     
-    def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA, include_emission_lines=True, minimumLineFlux=0, minimumLineWavelength = 0.9*u.micron, maximumLineWavelength = 2.03*u.micron, use_synphot=True):
+    def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA, include_emission_lines=True, minimumLineFlux=0, minimumLineWavelength = 0.9*u.micron, maximumLineWavelength = 2.03*u.micron, use_synphot=True, dust_model=None, dust_params=None, dust_law='calzetti', random_uniform_index=None):
         components=['disk','spheroid']
         if includeAGN:
             components.append('AGN')    
         for i,component in enumerate(components):
-            spectrum = self.evaluate_component_spectrum(filename, galIndex, component=component, obs_wavelengths=obs_wavelengths, lineFWHM=lineFWHM, include_emission_lines=include_emission_lines, minimumLineFlux=minimumLineFlux, minimumLineWavelength=minimumLineWavelength, maximumLineWavelength=maximumLineWavelength, use_synphot=use_synphot)
+            spectrum = self.evaluate_component_spectrum(filename, galIndex, component=component, obs_wavelengths=obs_wavelengths, lineFWHM=lineFWHM, include_emission_lines=include_emission_lines, minimumLineFlux=minimumLineFlux, minimumLineWavelength=minimumLineWavelength, maximumLineWavelength=maximumLineWavelength, use_synphot=use_synphot, dust_model=dust_model, dust_params=dust_params, dust_law=dust_law, random_uniform_index=random_uniform_index)
             if i==0:
                 total_spectrum = spectrum
             else:

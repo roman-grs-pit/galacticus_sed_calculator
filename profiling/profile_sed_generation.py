@@ -82,7 +82,7 @@ def profile_sed_generation(
     import h5py
     with h5py.File(galacticus_filename, 'r') as f:
         # Auto-detect format and get redshift dataset path
-        from SEDfromSFH import detect_galacticus_format
+        from galacticus_sed_calculator.sed_calculator import detect_galacticus_format
         format_type, base_path = detect_galacticus_format(galacticus_filename)
         
         if format_type == 'lightcone':

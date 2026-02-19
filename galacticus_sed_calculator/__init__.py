@@ -6,5 +6,10 @@ based on saved star formation histories.
 """
 
 from .sed_calculator import SEDCalculator
+from .dust_attenuation import (
+    dust_attenuation_gb10_generalised,
+    calzetti_attenuation_law,
+    apply_dust_attenuation_to_line
+)
 
 __version__ = "0.1.0"
