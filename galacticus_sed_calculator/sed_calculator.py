@@ -998,14 +998,15 @@ class SEDCalculator:
                 lineLuminosities = np.array([f[path][galIndex] for path in hdf5_paths])
             
             for lineName, lineRestWavelength, lineLuminosity in zip(lineNames, lineRestWavelengths, lineLuminosities):
-                lineWavelength = (lineRestWavelength * u.AA) * (1 + redshift)
+                lineRestWavelength = lineRestWavelength * u.AA
+                lineWavelength = lineRestWavelength * (1 + redshift)
                 if (lineWavelength < minimumLineWavelength) or (lineWavelength > maximumLineWavelength):
                     continue
                 lineFlux = lineLuminosity * (u.erg/u.s) / (4 * np.pi * (self.cosmo.luminosity_distance(redshift).to(u.cm))**2)
                 
                 # Apply dust attenuation if specified
                 if A_Halpha is not None:
-                    lineFlux = apply_dust_attenuation_to_line(lineFlux, lineWavelength, A_Halpha, dust_law=dust_law)
+                    lineFlux = apply_dust_attenuation_to_line(lineFlux, lineRestWavelength, A_Halpha, dust_law=dust_law)
                 
                 if lineFlux <= minimumLineFlux:
                     continue
