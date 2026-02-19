@@ -23,13 +23,11 @@ high_res_wavelengths = np.linspace(1e4, 2e4, 5000)*u.angstrom
 
 # Parameters for the GB10 dust attenuation model
 dust_model = 'gb10_generalised'
-dust_params = {
-    'delta_0': 0.275,      
-    'delta_z': -1.614,    
-    'delta_M': -0.834,     
-    'delta_Mz': -0.708,    
-    'attenuation_scatter': 0.25  
-}
+dust_params = {'delta_0': 0.2772142287561473,
+ 'delta_z': -1.579233727951697,
+ 'delta_M': -0.8180063760711892,
+ 'delta_Mz': -0.5287832073987419,
+ 'attenuation_scatter': 0.25}
 dust_law='calzetti'
 
 # Select a galaxy to analyze
