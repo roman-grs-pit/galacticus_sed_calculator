@@ -185,9 +185,12 @@ def calculate_dust_attenuated_emission_lines(galacticus_file, base_path, format_
     Returns
     -------
     attenuated_datasets : dict
-        Mapping of dataset name (e.g.
-        ``'dustAttenuatedLuminosityEmissionLineDisk:balmerAlpha6565'``) to
-        a NumPy array of dust-attenuated luminosities.
+        Mapping of dataset name (same as the original ``luminosityEmissionLine*``
+        name, e.g. ``'luminosityEmissionLineDisk:balmerAlpha6565'``) to a NumPy
+        array of dust-attenuated luminosities.  The datasets are intended to be
+        written into a ``dustAttenuatedNodeData`` group rather than into
+        ``nodeData``, so they intentionally carry the same name as their
+        dust-free counterparts.
     """
     node_data_path = f'{base_path}/nodeData'
 
@@ -257,40 +260,33 @@ def calculate_dust_attenuated_emission_lines(galacticus_file, base_path, format_
         attenuation_factor = 10.0 ** (-0.4 * A_lambda)
         attenuated_lum = luminosities * attenuation_factor
 
-        new_name = dataset_name.replace(
-            'luminosityEmissionLine', 'dustAttenuatedLuminosityEmissionLine'
-        )
-        attenuated_datasets[new_name] = attenuated_lum
+        # Keep the same dataset name; the caller writes these into a
+        # separate 'dustAttenuatedNodeData' group.
+        attenuated_datasets[dataset_name] = attenuated_lum
 
     return attenuated_datasets
 
 
-def save_dust_model_metadata(galacticus_file, dust_model, dust_params, dust_law):
+def save_dust_model_metadata(group, dust_model, dust_params, dust_law):
     """
-    Save dust model metadata to a top-level ``DustModel`` group in the HDF5 file.
+    Attach dust model metadata as attributes to an HDF5 group.
 
     Parameters
     ----------
-    galacticus_file : str
-        Path to the Galacticus HDF5 file (will be modified in-place).
+    group : h5py.Group
+        The HDF5 group to which the attributes will be attached (typically the
+        ``dustAttenuatedNodeData`` group).
     dust_model : str
         Name of the dust model.
     dust_params : dict
-        Dictionary of dust model parameters.
+        Dictionary of dust model parameters.  Stored as a JSON string under the
+        ``dust_params`` attribute so that the nested structure is preserved.
     dust_law : str
         Name of the attenuation law.
     """
-    with h5py.File(galacticus_file, 'a') as f:
-        # Remove existing group if present
-        if 'DustModel' in f:
-            del f['DustModel']
-        grp = f.create_group('DustModel')
-        grp.attrs['dust_model'] = dust_model
-        grp.attrs['dust_law'] = dust_law
-        for param_name, param_value in dust_params.items():
-            grp.attrs[param_name] = param_value
-
-    print(f"Saved DustModel metadata to {galacticus_file}")
+    group.attrs['dust_model'] = dust_model
+    group.attrs['dust_law'] = dust_law
+    group.attrs['dust_params'] = json.dumps(dust_params)
 
 
 def load_roman_bandpasses(filter_names):
@@ -656,10 +652,22 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
     """
     Save magnitude data directly to the Galacticus HDF5 file.
     
-    Magnitudes are saved to datasets with paths like:
+    Dust-free magnitudes are written to:
     /Lightcone/Output1/nodeData/apparentMagnitudeRomanWFI:<filter>
     or
     /Outputs/Output1/nodeData/apparentMagnitudeRomanWFI:<filter>
+
+    When dust results are present, a parallel ``dustAttenuatedNodeData`` group
+    is created at the same level as ``nodeData``.  Dust-attenuated magnitudes
+    and emission lines are stored there with the **same dataset names** as their
+    dust-free counterparts, e.g.::
+
+        /Lightcone/Output1/dustAttenuatedNodeData/apparentMagnitudeRomanWFI:F062
+        /Lightcone/Output1/dustAttenuatedNodeData/luminosityEmissionLineDisk:balmerAlpha6565
+
+    The dust model used is recorded as attributes of the
+    ``dustAttenuatedNodeData`` group (``dust_model``, ``dust_law``,
+    ``dust_params`` stored as a JSON string).
     
     Parameters
     ----------
@@ -719,46 +727,50 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
             dataset.attrs['comment'] = comment.encode('utf-8')
             dataset.attrs['filter'] = filter_name.encode('utf-8')
 
-        # Save dust-attenuated magnitudes if present
-        if 'dust_magnitudes' in results:
+        # Save dust-attenuated data into a separate dustAttenuatedNodeData group
+        if 'dust_magnitudes' in results or 'dust_emission_lines' in results:
+            dust_group_path = f'{base_path}/dustAttenuatedNodeData'
             dust_comment = comment.replace(
                 "AB magnitude", "dust-attenuated AB magnitude"
             )
-            dust_magnitude_array = results['dust_magnitudes']
-            for j, filter_name in enumerate(filter_names):
-                dust_path = f'{node_data_path}/dustAttenuatedApparentMagnitudeRomanWFI:{filter_name}'
-                if dust_path in f:
-                    print(f"  Deleting existing dataset: {dust_path}")
-                    del f[dust_path]
-                print(f"  Creating dataset: {dust_path}")
-                ds = f.create_dataset(dust_path, data=dust_magnitude_array[:, j])
-                ds.attrs['comment'] = dust_comment.encode('utf-8')
-                ds.attrs['filter'] = filter_name.encode('utf-8')
 
-        # Save dust-attenuated emission lines if present
-        if 'dust_emission_lines' in results:
-            for ds_name, attenuated_lum in results['dust_emission_lines'].items():
-                ds_path = f'{node_data_path}/{ds_name}'
-                if ds_path in f:
-                    print(f"  Deleting existing dataset: {ds_path}")
-                    del f[ds_path]
-                print(f"  Creating dataset: {ds_path}")
-                f.create_dataset(ds_path, data=attenuated_lum)
+            # Create (or overwrite) the dustAttenuatedNodeData group
+            if dust_group_path in f:
+                del f[dust_group_path]
+            dust_group = f.create_group(dust_group_path)
+
+            # Attach dust model metadata to the group
+            save_dust_model_metadata(
+                dust_group,
+                results['dust_model'],
+                results['dust_params'],
+                results['dust_law'],
+            )
+
+            # Dust-attenuated magnitudes (same dataset names as dust-free)
+            if 'dust_magnitudes' in results:
+                dust_magnitude_array = results['dust_magnitudes']
+                for j, filter_name in enumerate(filter_names):
+                    dust_path = f'{dust_group_path}/apparentMagnitudeRomanWFI:{filter_name}'
+                    print(f"  Creating dataset: {dust_path}")
+                    ds = f.create_dataset(
+                        dust_path, data=dust_magnitude_array[:, j]
+                    )
+                    ds.attrs['comment'] = dust_comment.encode('utf-8')
+                    ds.attrs['filter'] = filter_name.encode('utf-8')
+
+            # Dust-attenuated emission lines (same dataset names as dust-free)
+            if 'dust_emission_lines' in results:
+                for ds_name, attenuated_lum in results['dust_emission_lines'].items():
+                    ds_path = f'{dust_group_path}/{ds_name}'
+                    print(f"  Creating dataset: {ds_path}")
+                    f.create_dataset(ds_path, data=attenuated_lum)
     
     print(f"Saved {len(filter_names)} magnitude datasets to {galacticus_file}")
     if 'dust_magnitudes' in results:
         print(f"Saved {len(filter_names)} dust-attenuated magnitude datasets to {galacticus_file}")
     if 'dust_emission_lines' in results:
         print(f"Saved {len(results['dust_emission_lines'])} dust-attenuated emission line datasets to {galacticus_file}")
-
-    # Save dust model metadata if a dust model was used
-    if 'dust_model' in results:
-        save_dust_model_metadata(
-            galacticus_file,
-            results['dust_model'],
-            results['dust_params'],
-            results['dust_law'],
-        )
 
 
 def save_magnitude_catalog(results, output_file):

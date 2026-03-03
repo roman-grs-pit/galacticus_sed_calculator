@@ -4,8 +4,9 @@ Tests for dust attenuation support in calculate_catalog_magnitudes.py.
 These tests cover:
 - load_dust_config: loading a JSON config file for the dust model
 - calculate_dust_attenuated_emission_lines: vectorised emission-line attenuation
-- save_dust_model_metadata: writing the DustModel group to an HDF5 file
-- save_magnitudes_to_galacticus_file: saving dust-attenuated magnitude datasets
+- save_dust_model_metadata: writing dust model attributes onto an HDF5 group
+- save_magnitudes_to_galacticus_file: saving dust-attenuated datasets into the
+  dustAttenuatedNodeData group
 """
 
 import json
@@ -119,7 +120,8 @@ class TestCalculateDustAttenuatedEmissionLines(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
-    def test_returns_dict_with_correct_names(self):
+    def test_returns_dict_with_same_names_as_intrinsic(self):
+        """Returned keys should match the original luminosityEmissionLine* names."""
         result = calculate_dust_attenuated_emission_lines(
             self.hdf5_path,
             base_path='/Lightcone/Output1',
@@ -128,11 +130,15 @@ class TestCalculateDustAttenuatedEmissionLines(unittest.TestCase):
             dust_params=DUST_PARAMS,
             dust_law=DUST_LAW,
         )
-        # Both source datasets should produce an attenuated counterpart
-        self.assertIn('dustAttenuatedLuminosityEmissionLineDisk:balmerAlpha6565', result)
-        self.assertIn('dustAttenuatedLuminosityEmissionLineAGN:balmerAlpha5008', result)
+        # Keys must be the same as the original dataset names (no prefix added)
+        self.assertIn('luminosityEmissionLineDisk:balmerAlpha6565', result)
+        self.assertIn('luminosityEmissionLineAGN:balmerAlpha5008', result)
+        # Must NOT have the old dustAttenuated* prefix
+        for key in result:
+            self.assertFalse(key.startswith('dustAttenuated'),
+                             f"Key should not have dustAttenuated prefix: {key}")
 
-    def test_attenuated_luminosity_is_less_than_or_equal_to_intrinsic(self):
+    def test_attenuated_luminosity_is_less_than_intrinsic(self):
         """Dust attenuation can only reduce luminosity."""
         result = calculate_dust_attenuated_emission_lines(
             self.hdf5_path,
@@ -145,7 +151,7 @@ class TestCalculateDustAttenuatedEmissionLines(unittest.TestCase):
         with h5py.File(self.hdf5_path, 'r') as f:
             intrinsic = f['Lightcone/Output1/nodeData/'
                           'luminosityEmissionLineDisk:balmerAlpha6565'][:]
-        attenuated = result['dustAttenuatedLuminosityEmissionLineDisk:balmerAlpha6565']
+        attenuated = result['luminosityEmissionLineDisk:balmerAlpha6565']
         # Dust can only reduce flux: attenuated < intrinsic (strictly, because
         # GB10 gives positive A_Halpha for realistic stellar masses)
         np.testing.assert_array_less(attenuated, intrinsic)
@@ -192,41 +198,43 @@ class TestCalculateDustAttenuatedEmissionLines(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestSaveDustModelMetadata(unittest.TestCase):
-    """Tests for save_dust_model_metadata."""
+    """Tests for save_dust_model_metadata (writes to an h5py.Group)."""
 
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp()
         self.hdf5_path = os.path.join(self.tmp_dir, 'catalog.hdf5')
-        # Create a minimal HDF5 file
         with h5py.File(self.hdf5_path, 'w') as f:
-            f.create_group('Lightcone')
+            f.create_group('TestGroup')
 
     def tearDown(self):
         import shutil
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
-    def test_dust_model_group_is_created(self):
-        save_dust_model_metadata(self.hdf5_path, DUST_MODEL, DUST_PARAMS, DUST_LAW)
-        with h5py.File(self.hdf5_path, 'r') as f:
-            self.assertIn('DustModel', f)
-
     def test_dust_model_attributes_are_correct(self):
-        save_dust_model_metadata(self.hdf5_path, DUST_MODEL, DUST_PARAMS, DUST_LAW)
-        with h5py.File(self.hdf5_path, 'r') as f:
-            grp = f['DustModel']
+        with h5py.File(self.hdf5_path, 'a') as f:
+            grp = f['TestGroup']
+            save_dust_model_metadata(grp, DUST_MODEL, DUST_PARAMS, DUST_LAW)
             self.assertEqual(grp.attrs['dust_model'], DUST_MODEL)
             self.assertEqual(grp.attrs['dust_law'], DUST_LAW)
-            self.assertAlmostEqual(grp.attrs['delta_0'], 0.275)
-            self.assertAlmostEqual(grp.attrs['delta_z'], -1.614)
 
-    def test_overwrite_replaces_existing_group(self):
-        # Write once, then overwrite
-        save_dust_model_metadata(self.hdf5_path, DUST_MODEL, DUST_PARAMS, DUST_LAW)
+    def test_dust_params_stored_as_json_string(self):
+        """dust_params should be stored as a JSON string to preserve nesting."""
+        with h5py.File(self.hdf5_path, 'a') as f:
+            grp = f['TestGroup']
+            save_dust_model_metadata(grp, DUST_MODEL, DUST_PARAMS, DUST_LAW)
+            stored = json.loads(grp.attrs['dust_params'])
+        self.assertAlmostEqual(stored['delta_0'], 0.275)
+        self.assertAlmostEqual(stored['delta_z'], -1.614)
+
+    def test_overwrite_replaces_attributes(self):
         new_params = dict(DUST_PARAMS)
         new_params['delta_0'] = 999.0
-        save_dust_model_metadata(self.hdf5_path, DUST_MODEL, new_params, DUST_LAW)
-        with h5py.File(self.hdf5_path, 'r') as f:
-            self.assertAlmostEqual(f['DustModel'].attrs['delta_0'], 999.0)
+        with h5py.File(self.hdf5_path, 'a') as f:
+            grp = f['TestGroup']
+            save_dust_model_metadata(grp, DUST_MODEL, DUST_PARAMS, DUST_LAW)
+            save_dust_model_metadata(grp, DUST_MODEL, new_params, DUST_LAW)
+            stored = json.loads(grp.attrs['dust_params'])
+        self.assertAlmostEqual(stored['delta_0'], 999.0)
 
 
 # ---------------------------------------------------------------------------
@@ -234,7 +242,7 @@ class TestSaveDustModelMetadata(unittest.TestCase):
 # ---------------------------------------------------------------------------
 
 class TestSaveMagnitudesWithDust(unittest.TestCase):
-    """Tests that dust-attenuated datasets are written by save_magnitudes_to_galacticus_file."""
+    """Tests that dust-attenuated datasets are written to dustAttenuatedNodeData."""
 
     def setUp(self):
         self.tmp_dir = tempfile.mkdtemp()
@@ -262,23 +270,28 @@ class TestSaveMagnitudesWithDust(unittest.TestCase):
             results['dust_model'] = DUST_MODEL
             results['dust_params'] = DUST_PARAMS
             results['dust_law'] = DUST_LAW
-            # Build fake dust emission line datasets
+            # Dust emission line datasets use the SAME names as the dust-free
+            # versions (they will be stored in dustAttenuatedNodeData group)
             results['dust_emission_lines'] = {
-                'dustAttenuatedLuminosityEmissionLineDisk:balmerAlpha6565':
+                'luminosityEmissionLineDisk:balmerAlpha6565':
                     np.full(n_gals, 1e41),
             }
         return results
 
-    def test_dust_magnitude_datasets_created(self):
+    def test_dust_magnitude_datasets_in_dust_group(self):
+        """Dust-attenuated magnitudes must be in dustAttenuatedNodeData, not nodeData."""
         results = self._make_results(with_dust=True)
         save_magnitudes_to_galacticus_file(
             self.hdf5_path, results, component='total',
             format_type='lightcone', base_path='/Lightcone/Output1',
         )
         with h5py.File(self.hdf5_path, 'r') as f:
+            dust_nd = f['Lightcone/Output1/dustAttenuatedNodeData']
+            self.assertIn('apparentMagnitudeRomanWFI:F062', dust_nd)
+            self.assertIn('apparentMagnitudeRomanWFI:F158', dust_nd)
+            # Must NOT exist as dustAttenuated* in the regular nodeData group
             nd = f['Lightcone/Output1/nodeData']
-            self.assertIn('dustAttenuatedApparentMagnitudeRomanWFI:F062', nd)
-            self.assertIn('dustAttenuatedApparentMagnitudeRomanWFI:F158', nd)
+            self.assertNotIn('dustAttenuatedApparentMagnitudeRomanWFI:F062', nd)
 
     def test_dust_magnitude_values_are_correct(self):
         results = self._make_results(with_dust=True)
@@ -287,43 +300,48 @@ class TestSaveMagnitudesWithDust(unittest.TestCase):
             format_type='lightcone', base_path='/Lightcone/Output1',
         )
         with h5py.File(self.hdf5_path, 'r') as f:
-            data = f['Lightcone/Output1/nodeData/'
-                      'dustAttenuatedApparentMagnitudeRomanWFI:F062'][:]
+            data = f['Lightcone/Output1/dustAttenuatedNodeData/'
+                      'apparentMagnitudeRomanWFI:F062'][:]
         np.testing.assert_array_almost_equal(data, np.full(5, 25.0))
 
-    def test_dust_emission_line_dataset_created(self):
+    def test_dust_emission_line_in_dust_group(self):
+        """Dust-attenuated emission lines must be in dustAttenuatedNodeData."""
         results = self._make_results(with_dust=True)
         save_magnitudes_to_galacticus_file(
             self.hdf5_path, results, component='total',
             format_type='lightcone', base_path='/Lightcone/Output1',
         )
         with h5py.File(self.hdf5_path, 'r') as f:
-            nd = f['Lightcone/Output1/nodeData']
+            dust_nd = f['Lightcone/Output1/dustAttenuatedNodeData']
             self.assertIn(
-                'dustAttenuatedLuminosityEmissionLineDisk:balmerAlpha6565', nd
+                'luminosityEmissionLineDisk:balmerAlpha6565', dust_nd
             )
 
-    def test_dust_model_metadata_group_created(self):
+    def test_dust_model_metadata_on_dust_group(self):
+        """Dust model attributes must live on dustAttenuatedNodeData, not a top-level DustModel group."""
         results = self._make_results(with_dust=True)
         save_magnitudes_to_galacticus_file(
             self.hdf5_path, results, component='total',
             format_type='lightcone', base_path='/Lightcone/Output1',
         )
         with h5py.File(self.hdf5_path, 'r') as f:
-            self.assertIn('DustModel', f)
-            self.assertEqual(f['DustModel'].attrs['dust_model'], DUST_MODEL)
+            # No top-level DustModel group
+            self.assertNotIn('DustModel', f)
+            # Metadata on the dustAttenuatedNodeData group
+            grp = f['Lightcone/Output1/dustAttenuatedNodeData']
+            self.assertEqual(grp.attrs['dust_model'], DUST_MODEL)
+            stored = json.loads(grp.attrs['dust_params'])
+            self.assertAlmostEqual(stored['delta_0'], 0.275)
 
-    def test_no_dust_datasets_when_dust_not_requested(self):
+    def test_no_dust_group_when_dust_not_requested(self):
         results = self._make_results(with_dust=False)
         save_magnitudes_to_galacticus_file(
             self.hdf5_path, results, component='total',
             format_type='lightcone', base_path='/Lightcone/Output1',
         )
         with h5py.File(self.hdf5_path, 'r') as f:
-            nd = f['Lightcone/Output1/nodeData']
-            dust_keys = [k for k in nd.keys()
-                         if k.startswith('dustAttenuated')]
-            self.assertEqual(dust_keys, [])
+            self.assertNotIn('dustAttenuatedNodeData',
+                             f['Lightcone/Output1'])
             self.assertNotIn('DustModel', f)
 
 
