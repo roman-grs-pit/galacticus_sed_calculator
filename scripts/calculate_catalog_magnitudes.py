@@ -34,7 +34,7 @@ from galacticus_sed_calculator.dust_attenuation import (
 DEFAULT_SED_TEMPLATE = "data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5"
 DEFAULT_FILTERS = ["F062", "F087", "F106", "F129", "F158", "F184", "F213"]
 DEFAULT_WAVELENGTH_MIN = 4000  # Angstroms
-DEFAULT_WAVELENGTH_MAX = 23000  # Angstroms
+DEFAULT_WAVELENGTH_MAX = 24000  # Angstroms
 DEFAULT_WAVELENGTH_NPOINTS = 2000
 
 # Module-level state for worker processes (populated by _init_worker)
@@ -922,7 +922,7 @@ def main():
             print("\nWARNING: Saving to input file directly (no copy will be made)")
     
     check_existing = not args.no_check_existing
-    
+
     # Calculate magnitudes
     results = calculate_catalog_magnitudes(
         sed_template_file=args.sed_template,
