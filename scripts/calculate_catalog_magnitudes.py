@@ -17,6 +17,7 @@ import shutil
 import os
 import argparse
 import sys
+import multiprocessing
 
 # Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -29,6 +30,55 @@ DEFAULT_FILTERS = ["F062", "F087", "F106", "F129", "F158", "F184", "F213"]
 DEFAULT_WAVELENGTH_MIN = 4000  # Angstroms
 DEFAULT_WAVELENGTH_MAX = 23000  # Angstroms
 DEFAULT_WAVELENGTH_NPOINTS = 2000
+
+# Module-level state for worker processes (populated by _init_worker)
+_worker_state = {}
+
+
+def _init_worker(sed_template_file, filter_names, cosmology):
+    """
+    Initialize per-worker process state.
+
+    Called once per worker process when using multiprocessing.Pool. Loads the
+    SEDCalculator and Roman bandpass filters so they are reused across all
+    galaxy tasks assigned to that worker.
+    """
+    global _worker_state
+    calc = SEDCalculator(sed_template_file, cosmology=cosmology)
+    roman = stpsf.WFI()
+    bandpasses = {f: roman._get_synphot_bandpass(f) for f in filter_names}
+    _worker_state['calc'] = calc
+    _worker_state['bandpasses'] = bandpasses
+
+
+def _process_galaxy_worker(args):
+    """
+    Worker function: calculate magnitudes for a single galaxy.
+
+    Parameters
+    ----------
+    args : tuple
+        (galaxy_index, working_file, component, obs_wavelengths)
+
+    Returns
+    -------
+    tuple
+        (galaxy_index, magnitudes_dict) where magnitudes_dict maps filter names
+        to magnitude values, or None if the calculation failed.
+    """
+    i, working_file, component, obs_wavelengths = args
+    try:
+        mags = _worker_state['calc'].calculate_magnitudes(
+            working_file,
+            galIndex=i,
+            bandpasses=_worker_state['bandpasses'],
+            component=component,
+            obs_wavelengths=obs_wavelengths
+        )
+        return i, mags
+    except Exception as e:
+        print(f"\nWarning: Failed to process galaxy {i}: {type(e).__name__}: {e}")
+        return i, None
 
 
 def load_roman_bandpasses(filter_names):
@@ -82,7 +132,8 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                                  bandpasses, output_file=None,
                                  max_galaxies=None, component='total',
                                  save_to_input=False, copy_input=True,
-                                 check_existing=True, obs_wavelengths=None):
+                                 check_existing=True, obs_wavelengths=None,
+                                 n_jobs=1):
     """
     Calculate magnitudes for all galaxies in a Galacticus catalog.
     
@@ -119,6 +170,10 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     obs_wavelengths : Quantity, optional
         Wavelength grid for spectrum calculation. If None, uses default
         np.linspace(4000, 23000, 2000) * u.AA
+    n_jobs : int, optional
+        Number of parallel worker processes to use. ``1`` (default) runs
+        sequentially. ``-1`` uses all available CPU cores. Values greater
+        than 1 request that exact number of workers.
     
     Returns
     -------
@@ -224,37 +279,68 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         print(f"  Fixed-time output at z={redshifts[0]:.4f} (outputTime={outputTime:.4f} Gyr)")
     
     # Calculate magnitudes for each galaxy
+    if n_jobs == 0 or (n_jobs < -1):
+        raise ValueError(f"n_jobs must be -1 (all CPUs), 1 (sequential), or a positive integer; got {n_jobs}")
+    actual_n_jobs = multiprocessing.cpu_count() if n_jobs == -1 else n_jobs
     print(f"\nCalculating magnitudes in {n_filters} filters for {n_galaxies} galaxies...")
+    if actual_n_jobs > 1:
+        print(f"Using {actual_n_jobs} parallel worker processes")
     print("Progress: ", end='', flush=True)
-    
+
     start_time = time.time()
-    
-    for i in range(n_galaxies):
-        # Progress indicator
-        if (i + 1) % max(1, n_galaxies // 20) == 0:
-            progress = (i + 1) / n_galaxies * 100
-            elapsed = time.time() - start_time
-            rate = (i + 1) / elapsed
-            remaining = (n_galaxies - i - 1) / rate if rate > 0 else 0
-            print(f"{progress:.0f}% ", end='', flush=True)
-        
-        try:
-            # Calculate magnitudes for this galaxy
-            mags = calc.calculate_magnitudes(
-                working_file, 
-                galIndex=i,
-                bandpasses=bandpasses,
-                component=component,
-                obs_wavelengths=obs_wavelengths
-            )
-            
-            # Store results in array
-            for j, filter_name in enumerate(filter_names):
-                magnitude_array[i, j] = mags[filter_name]
-                
-        except Exception as e:
-            print(f"\nWarning: Failed to process galaxy {i}: {e}")
-            # magnitude_array already initialized with NaN values
+
+    if actual_n_jobs == 1:
+        # Sequential path (original behaviour)
+        for i in range(n_galaxies):
+            # Progress indicator
+            if (i + 1) % max(1, n_galaxies // 20) == 0:
+                progress = (i + 1) / n_galaxies * 100
+                elapsed = time.time() - start_time
+                rate = (i + 1) / elapsed
+                remaining = (n_galaxies - i - 1) / rate if rate > 0 else 0
+                print(f"{progress:.0f}% ", end='', flush=True)
+
+            try:
+                # Calculate magnitudes for this galaxy
+                mags = calc.calculate_magnitudes(
+                    working_file,
+                    galIndex=i,
+                    bandpasses=bandpasses,
+                    component=component,
+                    obs_wavelengths=obs_wavelengths
+                )
+
+                # Store results in array
+                for j, filter_name in enumerate(filter_names):
+                    magnitude_array[i, j] = mags[filter_name]
+
+            except Exception as e:
+                print(f"\nWarning: Failed to process galaxy {i}: {e}")
+                # magnitude_array already initialized with NaN values
+    else:
+        # Parallel path using multiprocessing.Pool
+        cosmology = calc.cosmo
+        worker_args = [
+            (i, working_file, component, obs_wavelengths)
+            for i in range(n_galaxies)
+        ]
+        with multiprocessing.Pool(
+            processes=actual_n_jobs,
+            initializer=_init_worker,
+            initargs=(sed_template_file, filter_names, cosmology)
+        ) as pool:
+            n_done = 0
+            for i, mags in pool.imap_unordered(_process_galaxy_worker, worker_args):
+                n_done += 1
+                if n_done % max(1, n_galaxies // 20) == 0:
+                    progress = n_done / n_galaxies * 100
+                    elapsed = time.time() - start_time
+                    rate = n_done / elapsed
+                    print(f"{progress:.0f}% ", end='', flush=True)
+                if mags is not None:
+                    for j, filter_name in enumerate(filter_names):
+                        magnitude_array[i, j] = mags[filter_name]
+                # If mags is None the row stays as NaN (already initialised)
     
     print("Done!")
     
@@ -421,6 +507,9 @@ def parse_arguments():
     parser.add_argument('-c', '--component', default='total',
                        choices=['total', 'disk', 'spheroid', 'AGN'],
                        help='Galaxy component to use for magnitude calculation')
+    parser.add_argument('-j', '--n-jobs', type=int, default=1,
+                       help='Number of parallel worker processes. '
+                            '1 = sequential (default). -1 = use all available CPUs.')
     
     # Save options
     save_group = parser.add_mutually_exclusive_group()
@@ -463,6 +552,8 @@ def main():
     print(f"Filters: {', '.join(args.filters)}")
     print(f"Component: {args.component}")
     print(f"Magnitude system: {args.magnitude_system}")
+    print(f"Parallel workers: {args.n_jobs} "
+          f"({'all CPUs' if args.n_jobs == -1 else 'sequential' if args.n_jobs == 1 else f'{args.n_jobs} workers'})")
     
     if args.max_galaxies:
         print(f"Max galaxies: {args.max_galaxies}")
@@ -513,7 +604,8 @@ def main():
         save_to_input=save_to_input,
         copy_input=copy_input,
         check_existing=check_existing,
-        obs_wavelengths=obs_wavelengths
+        obs_wavelengths=obs_wavelengths,
+        n_jobs=args.n_jobs
     )
     
     if results is not None:
