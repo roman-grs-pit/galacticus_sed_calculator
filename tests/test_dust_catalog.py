@@ -217,7 +217,7 @@ class TestCalculateAndSaveDustAttenuatedEmissionLines(unittest.TestCase):
 
 
 class TestSaveMagnitudesToGalacticusFile(unittest.TestCase):
-    """Tests for save_magnitudes_to_galacticus_file() dust prefix behaviour."""
+    """Tests for save_magnitudes_to_galacticus_file() behaviour."""
 
     def setUp(self):
         self.tmp_file = _make_copy(GALACTICUS_FILE)
@@ -226,32 +226,50 @@ class TestSaveMagnitudesToGalacticusFile(unittest.TestCase):
         if os.path.exists(self.tmp_file):
             os.unlink(self.tmp_file)
 
-    def _make_results(self, prefix, n=5, filters=('F062', 'F158')):
-        return {
+    def _make_results(self, include_dust=False, n=5, filters=('F062', 'F158')):
+        results = {
             'magnitudes': np.full((n, len(filters)), 22.5),
             'filter_names': list(filters),
             'galaxy_indices': np.arange(n),
-            'magnitude_prefix': prefix,
-            'dust_model': None if prefix == 'apparentMagnitudeRomanWFI' else 'gb10_generalised',
+            'dust_model': 'gb10_generalised' if include_dust else None,
         }
+        if include_dust:
+            results['magnitudes_dust'] = np.full((n, len(filters)), 23.5)
+        return results
 
-    def test_saves_with_dust_free_prefix(self):
-        results = self._make_results('apparentMagnitudeRomanWFI')
+    def test_saves_dust_free_only(self):
+        """Without dust, only apparentMagnitudeRomanWFI datasets are written."""
+        results = self._make_results(include_dust=False)
         save_magnitudes_to_galacticus_file(self.tmp_file, results)
         with h5py.File(self.tmp_file, 'r') as f:
             nd = f['Lightcone/Output1/nodeData']
             self.assertIn('apparentMagnitudeRomanWFI:F062', nd)
             self.assertIn('apparentMagnitudeRomanWFI:F158', nd)
+            self.assertNotIn('dustAttenuatedApparentMagnitudeRomanWFI:F062', nd)
 
-    def test_saves_with_dust_attenuated_prefix(self):
-        results = self._make_results('dustAttenuatedApparentMagnitudeRomanWFI')
+    def test_saves_both_when_dust_enabled(self):
+        """With dust, both dust-free and dust-attenuated datasets are written."""
+        results = self._make_results(include_dust=True)
         save_magnitudes_to_galacticus_file(self.tmp_file, results)
         with h5py.File(self.tmp_file, 'r') as f:
             nd = f['Lightcone/Output1/nodeData']
+            # Dust-free must be present
+            self.assertIn('apparentMagnitudeRomanWFI:F062', nd)
+            self.assertIn('apparentMagnitudeRomanWFI:F158', nd)
+            # Dust-attenuated must also be present
             self.assertIn('dustAttenuatedApparentMagnitudeRomanWFI:F062', nd)
             self.assertIn('dustAttenuatedApparentMagnitudeRomanWFI:F158', nd)
-            # Dust-free key should NOT be present
-            self.assertNotIn('apparentMagnitudeRomanWFI:F062', nd)
+
+    def test_dust_attenuated_values_differ_from_dust_free(self):
+        """Dust-attenuated magnitudes should be stored with the correct values."""
+        results = self._make_results(include_dust=True)
+        save_magnitudes_to_galacticus_file(self.tmp_file, results)
+        with h5py.File(self.tmp_file, 'r') as f:
+            nd = f['Lightcone/Output1/nodeData']
+            nodust_vals = nd['apparentMagnitudeRomanWFI:F062'][:]
+            dust_vals = nd['dustAttenuatedApparentMagnitudeRomanWFI:F062'][:]
+            np.testing.assert_array_almost_equal(nodust_vals, np.full(5, 22.5))
+            np.testing.assert_array_almost_equal(dust_vals, np.full(5, 23.5))
 
 
 if __name__ == '__main__':

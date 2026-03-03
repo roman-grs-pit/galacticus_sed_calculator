@@ -68,6 +68,9 @@ def _process_galaxy_worker(args):
     """
     Worker function: calculate magnitudes for a single galaxy.
 
+    When a dust model is configured, both dust-free and dust-attenuated
+    magnitudes are calculated in a single call.
+
     Parameters
     ----------
     args : tuple
@@ -76,25 +79,36 @@ def _process_galaxy_worker(args):
     Returns
     -------
     tuple
-        (galaxy_index, magnitudes_dict) where magnitudes_dict maps filter names
-        to magnitude values, or None if the calculation failed.
+        (galaxy_index, mags_nodust, mags_dust) where each magnitudes value
+        maps filter names to magnitude values, or None if the calculation
+        failed.  ``mags_dust`` is None when no dust model is configured.
     """
     i, working_file, component, obs_wavelengths = args
+    dust_model = _worker_state['dust_model']
     try:
-        mags = _worker_state['calc'].calculate_magnitudes(
+        mags_nodust = _worker_state['calc'].calculate_magnitudes(
             working_file,
             galIndex=i,
             bandpasses=_worker_state['bandpasses'],
             component=component,
             obs_wavelengths=obs_wavelengths,
-            dust_model=_worker_state['dust_model'],
-            dust_params=_worker_state['dust_params'],
-            dust_law=_worker_state['dust_law'],
         )
-        return i, mags
+        mags_dust = None
+        if dust_model is not None:
+            mags_dust = _worker_state['calc'].calculate_magnitudes(
+                working_file,
+                galIndex=i,
+                bandpasses=_worker_state['bandpasses'],
+                component=component,
+                obs_wavelengths=obs_wavelengths,
+                dust_model=dust_model,
+                dust_params=_worker_state['dust_params'],
+                dust_law=_worker_state['dust_law'],
+            )
+        return i, mags_nodust, mags_dust
     except Exception as e:
         print(f"\nWarning: Failed to process galaxy {i}: {type(e).__name__}: {e}")
-        return i, None
+        return i, None, None
 
 
 def load_roman_bandpasses(filter_names):
@@ -410,7 +424,9 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     -------
     results : dict
         Dictionary with keys:
-        - 'magnitudes': 2D array of shape (n_galaxies, n_filters)
+        - 'magnitudes': 2D array of shape (n_galaxies, n_filters) — dust-free magnitudes
+        - 'magnitudes_dust': 2D array of shape (n_galaxies, n_filters), only present when
+          *dust_model* is not None — dust-attenuated magnitudes
         - 'filter_names': list of filter names
         - 'redshifts': array of galaxy redshifts
         - 'galaxy_indices': array of galaxy indices processed
@@ -451,17 +467,14 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     filter_names = list(bandpasses.keys())
     n_filters = len(filter_names)
 
-    # Determine the dataset name prefix depending on whether dust is applied
-    magnitude_prefix = 'dustAttenuatedApparentMagnitudeRomanWFI' if dust_model is not None else 'apparentMagnitudeRomanWFI'
-    
-    # Check if magnitudes already exist
+    # Check if magnitudes already exist (always check the dust-free key)
     if check_existing and save_to_input:
         print("\nChecking for existing magnitude datasets...")
         existing_filters = []
         node_data_path = f'{base_path}/nodeData'
         with h5py.File(working_file, 'r') as f:
             for filter_name in filter_names:
-                dataset_path = f'{node_data_path}/{magnitude_prefix}:{filter_name}'
+                dataset_path = f'{node_data_path}/apparentMagnitudeRomanWFI:{filter_name}'
                 if dataset_path in f:
                     existing_filters.append(filter_name)
         
@@ -495,7 +508,8 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         print(f"Processing all {n_galaxies} galaxies")
     
     # Initialize arrays to store results
-    magnitude_array = np.full((n_galaxies, n_filters), np.nan)
+    magnitude_array = np.full((n_galaxies, n_filters), np.nan)       # dust-free
+    magnitude_array_dust = np.full((n_galaxies, n_filters), np.nan)  # dust-attenuated (when dust_model set)
     redshifts = np.zeros(n_galaxies)
     
     # Read redshifts for all galaxies
@@ -536,25 +550,37 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                 print(f"{progress:.0f}% ", end='', flush=True)
 
             try:
-                # Calculate magnitudes for this galaxy
+                # Always calculate dust-free magnitudes
                 mags = calc.calculate_magnitudes(
                     working_file,
                     galIndex=i,
                     bandpasses=bandpasses,
                     component=component,
                     obs_wavelengths=obs_wavelengths,
-                    dust_model=dust_model,
-                    dust_params=dust_params,
-                    dust_law=dust_law,
                 )
 
-                # Store results in array
+                # Store dust-free results
                 for j, filter_name in enumerate(filter_names):
                     magnitude_array[i, j] = mags[filter_name]
 
+                # Also calculate dust-attenuated magnitudes when requested
+                if dust_model is not None:
+                    mags_dust = calc.calculate_magnitudes(
+                        working_file,
+                        galIndex=i,
+                        bandpasses=bandpasses,
+                        component=component,
+                        obs_wavelengths=obs_wavelengths,
+                        dust_model=dust_model,
+                        dust_params=dust_params,
+                        dust_law=dust_law,
+                    )
+                    for j, filter_name in enumerate(filter_names):
+                        magnitude_array_dust[i, j] = mags_dust[filter_name]
+
             except Exception as e:
                 print(f"\nWarning: Failed to process galaxy {i}: {e}")
-                # magnitude_array already initialized with NaN values
+                # magnitude arrays already initialized with NaN values
     else:
         # Parallel path using multiprocessing.Pool
         cosmology = calc.cosmo
@@ -569,17 +595,20 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                       dust_model, dust_params, dust_law)
         ) as pool:
             n_done = 0
-            for i, mags in pool.imap_unordered(_process_galaxy_worker, worker_args):
+            for i, mags_nodust, mags_dust in pool.imap_unordered(_process_galaxy_worker, worker_args):
                 n_done += 1
                 if n_done % max(1, n_galaxies // 20) == 0:
                     progress = n_done / n_galaxies * 100
                     elapsed = time.time() - start_time
                     rate = n_done / elapsed
                     print(f"{progress:.0f}% ", end='', flush=True)
-                if mags is not None:
+                if mags_nodust is not None:
                     for j, filter_name in enumerate(filter_names):
-                        magnitude_array[i, j] = mags[filter_name]
-                # If mags is None the row stays as NaN (already initialised)
+                        magnitude_array[i, j] = mags_nodust[filter_name]
+                if mags_dust is not None:
+                    for j, filter_name in enumerate(filter_names):
+                        magnitude_array_dust[i, j] = mags_dust[filter_name]
+                # If None, rows stay as NaN (already initialised)
     
     print("Done!")
     
@@ -588,15 +617,16 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     
     # Prepare results
     results = {
-        'magnitudes': magnitude_array,
+        'magnitudes': magnitude_array,            # dust-free
         'filter_names': filter_names,
         'redshifts': redshifts,
         'galaxy_indices': np.arange(n_galaxies),
         'format_type': format_type,
         'base_path': base_path,
         'dust_model': dust_model,
-        'magnitude_prefix': magnitude_prefix,
     }
+    if dust_model is not None:
+        results['magnitudes_dust'] = magnitude_array_dust
     
     # Save to file
     if save_to_input:
@@ -610,7 +640,7 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     
     # Print summary statistics
     print("\n" + "="*60)
-    print("SUMMARY STATISTICS")
+    print("SUMMARY STATISTICS (dust-free)")
     print("="*60)
     for j, filter_name in enumerate(filter_names):
         valid_mags = magnitude_array[:, j][~np.isnan(magnitude_array[:, j])]
@@ -621,6 +651,20 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                   f"valid={len(valid_mags)}/{n_galaxies}")
         else:
             print(f"{filter_name:6s}: No valid magnitudes")
+
+    if dust_model is not None:
+        print("\n" + "="*60)
+        print("SUMMARY STATISTICS (dust-attenuated)")
+        print("="*60)
+        for j, filter_name in enumerate(filter_names):
+            valid_mags = magnitude_array_dust[:, j][~np.isnan(magnitude_array_dust[:, j])]
+            if len(valid_mags) > 0:
+                print(f"{filter_name:6s}: mean={np.mean(valid_mags):6.2f}, "
+                      f"median={np.median(valid_mags):6.2f}, "
+                      f"std={np.std(valid_mags):5.2f}, "
+                      f"valid={len(valid_mags)}/{n_galaxies}")
+            else:
+                print(f"{filter_name:6s}: No valid magnitudes")
     
     return results
 
@@ -653,27 +697,29 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
         format_type, base_path = detect_galacticus_format(galacticus_file)
     
     filter_names = results['filter_names']
-    magnitude_array = results['magnitudes']
+    magnitude_array = results['magnitudes']           # dust-free
+    magnitude_array_dust = results.get('magnitudes_dust')  # dust-attenuated, or None
     n_galaxies = len(results['galaxy_indices'])
-    magnitude_prefix = results.get('magnitude_prefix', 'apparentMagnitudeRomanWFI')
     dust_model = results.get('dust_model')
 
-    # Determine comment based on component
-    dust_suffix = (
-        f" Dust attenuation applied using '{dust_model}' model."
-        if dust_model is not None
-        else ""
+    # Build per-prefix comment strings
+    def _comment(component, dust_suffix=''):
+        if component == 'total':
+            return f"Total AB magnitude (disk + spheroid + AGN) including emission lines. Note there is currently no AGN continuum.{dust_suffix}"
+        elif component == 'disk':
+            return f"Disk AB magnitude including emission lines.{dust_suffix}"
+        elif component == 'spheroid':
+            return f"Spheroid AB magnitude including emission lines.{dust_suffix}"
+        elif component == 'AGN':
+            return f"AGN AB magnitude (emission lines only).{dust_suffix}"
+        return f"{component} AB magnitude.{dust_suffix}"
+
+    comment_nodust = _comment(component)
+    comment_dust = _comment(
+        component,
+        dust_suffix=f" Dust attenuation applied using '{dust_model}' model."
+        if dust_model is not None else ''
     )
-    if component == 'total':
-        comment = f"Total AB magnitude (disk + spheroid + AGN) including emission lines. Note there is currently no AGN continuum.{dust_suffix}"
-    elif component == 'disk':
-        comment = f"Disk AB magnitude including emission lines.{dust_suffix}"
-    elif component == 'spheroid':
-        comment = f"Spheroid AB magnitude including emission lines.{dust_suffix}"
-    elif component == 'AGN':
-        comment = f"AGN AB magnitude (emission lines only).{dust_suffix}"
-    else:
-        comment = f"{component} AB magnitude.{dust_suffix}"
     
     with h5py.File(galacticus_file, 'a') as f:
         # Create or access the nodeData group
@@ -682,25 +728,32 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
             raise ValueError(f"Path {node_data_path} not found in {galacticus_file}")
         
         for j, filter_name in enumerate(filter_names):
-            dataset_path = f'{node_data_path}/{magnitude_prefix}:{filter_name}'
-            
-            # Delete existing dataset if it exists
-            if dataset_path in f:
-                print(f"  Deleting existing dataset: {dataset_path}")
-                del f[dataset_path]
-            
-            # Create new dataset
-            print(f"  Creating dataset: {dataset_path}")
-            dataset = f.create_dataset(
-                dataset_path,
-                data=magnitude_array[:, j]
-            )
-            
-            # Add attributes
-            dataset.attrs['comment'] = comment.encode('utf-8')
-            dataset.attrs['filter'] = filter_name.encode('utf-8')
+            # --- dust-free dataset (always written) ---
+            nodust_path = f'{node_data_path}/apparentMagnitudeRomanWFI:{filter_name}'
+            if nodust_path in f:
+                print(f"  Deleting existing dataset: {nodust_path}")
+                del f[nodust_path]
+            print(f"  Creating dataset: {nodust_path}")
+            ds = f.create_dataset(nodust_path, data=magnitude_array[:, j])
+            ds.attrs['comment'] = comment_nodust.encode('utf-8')
+            ds.attrs['filter'] = filter_name.encode('utf-8')
+
+            # --- dust-attenuated dataset (only when dust model was applied) ---
+            if magnitude_array_dust is not None:
+                dust_path = f'{node_data_path}/dustAttenuatedApparentMagnitudeRomanWFI:{filter_name}'
+                if dust_path in f:
+                    print(f"  Deleting existing dataset: {dust_path}")
+                    del f[dust_path]
+                print(f"  Creating dataset: {dust_path}")
+                ds_dust = f.create_dataset(dust_path, data=magnitude_array_dust[:, j])
+                ds_dust.attrs['comment'] = comment_dust.encode('utf-8')
+                ds_dust.attrs['filter'] = filter_name.encode('utf-8')
     
-    print(f"Saved {len(filter_names)} magnitude datasets to {galacticus_file}")
+    n_saved = len(filter_names)
+    if magnitude_array_dust is not None:
+        print(f"Saved {n_saved} dust-free + {n_saved} dust-attenuated magnitude datasets to {galacticus_file}")
+    else:
+        print(f"Saved {n_saved} magnitude datasets to {galacticus_file}")
 
 
 def save_magnitude_catalog(results, output_file):
