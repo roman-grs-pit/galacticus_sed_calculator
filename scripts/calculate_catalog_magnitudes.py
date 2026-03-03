@@ -18,11 +18,17 @@ import os
 import argparse
 import sys
 import multiprocessing
+import json
+import re
 
 # Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from galacticus_sed_calculator import SEDCalculator
-from galacticus_sed_calculator.sed_calculator import detect_galacticus_format
+from galacticus_sed_calculator.sed_calculator import detect_galacticus_format, outputTime_to_redshift
+from galacticus_sed_calculator.dust_attenuation import (
+    dust_attenuation_gb10_generalised,
+    _calzetti_k_lambda,
+)
 
 # Default configuration
 DEFAULT_SED_TEMPLATE = "data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5"
@@ -35,7 +41,8 @@ DEFAULT_WAVELENGTH_NPOINTS = 2000
 _worker_state = {}
 
 
-def _init_worker(sed_template_file, filter_names, cosmology):
+def _init_worker(sed_template_file, filter_names, cosmology,
+                 dust_model=None, dust_params=None, dust_law='calzetti'):
     """
     Initialize per-worker process state.
 
@@ -49,6 +56,9 @@ def _init_worker(sed_template_file, filter_names, cosmology):
     bandpasses = {f: roman._get_synphot_bandpass(f) for f in filter_names}
     _worker_state['calc'] = calc
     _worker_state['bandpasses'] = bandpasses
+    _worker_state['dust_model'] = dust_model
+    _worker_state['dust_params'] = dust_params
+    _worker_state['dust_law'] = dust_law
 
 
 def _process_galaxy_worker(args):
@@ -63,22 +73,224 @@ def _process_galaxy_worker(args):
     Returns
     -------
     tuple
-        (galaxy_index, magnitudes_dict) where magnitudes_dict maps filter names
-        to magnitude values, or None if the calculation failed.
+        (galaxy_index, result_dict) where result_dict contains:
+        - 'mags': dict mapping filter names to dust-free magnitude values
+        - 'dust_mags': dict mapping filter names to dust-attenuated magnitudes
+          (only present when a dust model is configured in _worker_state)
+        Returns (galaxy_index, None) if the calculation failed.
     """
     i, working_file, component, obs_wavelengths = args
     try:
-        mags = _worker_state['calc'].calculate_magnitudes(
+        result = {}
+        result['mags'] = _worker_state['calc'].calculate_magnitudes(
             working_file,
             galIndex=i,
             bandpasses=_worker_state['bandpasses'],
             component=component,
             obs_wavelengths=obs_wavelengths
         )
-        return i, mags
+        dust_model = _worker_state.get('dust_model')
+        if dust_model is not None:
+            result['dust_mags'] = _worker_state['calc'].calculate_magnitudes(
+                working_file,
+                galIndex=i,
+                bandpasses=_worker_state['bandpasses'],
+                component=component,
+                obs_wavelengths=obs_wavelengths,
+                dust_model=dust_model,
+                dust_params=_worker_state['dust_params'],
+                dust_law=_worker_state['dust_law'],
+            )
+        return i, result
     except Exception as e:
         print(f"\nWarning: Failed to process galaxy {i}: {type(e).__name__}: {e}")
         return i, None
+
+
+def load_dust_config(config_file):
+    """
+    Load dust model configuration from a JSON file.
+
+    Parameters
+    ----------
+    config_file : str
+        Path to a JSON file containing the dust model configuration.
+        Required keys: 'dust_model', 'dust_params', 'dust_law'.
+
+    Returns
+    -------
+    dust_model : str
+        Name of the dust model (e.g. 'gb10_generalised').
+    dust_params : dict
+        Dictionary of parameters for the dust model.
+    dust_law : str
+        Name of the attenuation law (e.g. 'calzetti').
+
+    Examples
+    --------
+    Example config file::
+
+        {
+            "dust_model": "gb10_generalised",
+            "dust_params": {
+                "delta_0": 0.275,
+                "delta_z": -1.614,
+                "delta_M": -0.834,
+                "delta_Mz": -0.708,
+                "attenuation_scatter": 0.0
+            },
+            "dust_law": "calzetti"
+        }
+    """
+    with open(config_file, 'r') as f:
+        config = json.load(f)
+
+    for key in ('dust_model', 'dust_params', 'dust_law'):
+        if key not in config:
+            raise ValueError(
+                f"Dust config file '{config_file}' is missing required key '{key}'. "
+                "Required keys: dust_model, dust_params, dust_law."
+            )
+
+    return config['dust_model'], config['dust_params'], config['dust_law']
+
+
+def calculate_dust_attenuated_emission_lines(galacticus_file, base_path, format_type,
+                                             dust_model, dust_params, dust_law,
+                                             n_galaxies=None):
+    """
+    Calculate dust-attenuated emission line luminosities for all galaxies.
+
+    Reads each ``luminosityEmissionLine*`` dataset from the HDF5 file, applies
+    dust attenuation using the specified model, and returns a dictionary of
+    attenuated arrays named ``dustAttenuatedLuminosityEmissionLine*``.
+
+    Parameters
+    ----------
+    galacticus_file : str
+        Path to the Galacticus HDF5 file.
+    base_path : str
+        Base path within the HDF5 file (e.g. '/Lightcone/Output1').
+    format_type : str
+        Catalog format: 'lightcone' or 'fixed-time'.
+    dust_model : str
+        Dust attenuation model name. Currently only 'gb10_generalised' is supported.
+    dust_params : dict
+        Parameters for the dust model.
+    dust_law : str
+        Attenuation law name. Currently only 'calzetti' is supported.
+    n_galaxies : int, optional
+        Number of galaxies to process. If None, processes all galaxies.
+
+    Returns
+    -------
+    attenuated_datasets : dict
+        Mapping of dataset name (e.g.
+        ``'dustAttenuatedLuminosityEmissionLineDisk:balmerAlpha6565'``) to
+        a NumPy array of dust-attenuated luminosities.
+    """
+    node_data_path = f'{base_path}/nodeData'
+
+    with h5py.File(galacticus_file, 'r') as f:
+        nd = f[node_data_path]
+
+        # Stellar mass for dust model
+        disk_mass = nd['diskMassStellar'][:]
+        spheroid_mass = nd['spheroidMassStellar'][:] if 'spheroidMassStellar' in nd else np.zeros_like(disk_mass)
+        total_stellar_mass = disk_mass + spheroid_mass
+
+        # Redshifts
+        if format_type == 'lightcone':
+            redshifts = nd['lightconeRedshiftObserved'][:]
+        else:
+            outputTime = f[base_path].attrs['outputTime']
+            redshift_val = float(outputTime_to_redshift(outputTime))
+            redshifts = np.full(len(total_stellar_mass), redshift_val)
+
+        # All emission line dataset names and their data
+        emission_line_names = [name for name in nd.keys()
+                               if name.startswith('luminosityEmissionLine')]
+        emission_line_data = {name: nd[name][:] for name in emission_line_names}
+
+    # Limit to n_galaxies if requested
+    if n_galaxies is not None:
+        total_stellar_mass = total_stellar_mass[:n_galaxies]
+        redshifts = redshifts[:n_galaxies]
+        emission_line_data = {k: v[:n_galaxies] for k, v in emission_line_data.items()}
+
+    # Compute per-galaxy H-alpha attenuation
+    if dust_model == 'gb10_generalised':
+        A_Halpha = dust_attenuation_gb10_generalised(
+            total_stellar_mass, redshifts, **dust_params
+        )
+    else:
+        raise ValueError(
+            f"Dust model '{dust_model}' not supported in "
+            "calculate_dust_attenuated_emission_lines. "
+            "Currently only 'gb10_generalised' is implemented."
+        )
+
+    # k(H-alpha) value used to re-scale to A(lambda)
+    HALPHA_WAVELENGTH_AA = 6562.8  # H-alpha rest-frame wavelength in Angstroms
+    k_Halpha = _calzetti_k_lambda(HALPHA_WAVELENGTH_AA)
+
+    attenuated_datasets = {}
+    for dataset_name, luminosities in emission_line_data.items():
+        # Extract rest-frame wavelength (trailing digits in the line name part)
+        # e.g. 'luminosityEmissionLineDisk:balmerAlpha6565' -> 6565
+        line_name_part = dataset_name.split(':')[-1]
+        match = re.search(r'\d+$', line_name_part)
+        if match is None:
+            continue
+        rest_wavelength_AA = float(match.group())
+
+        if dust_law == 'calzetti':
+            k_line = _calzetti_k_lambda(rest_wavelength_AA)
+            # A(lambda) = A_Halpha * k(lambda) / k(H-alpha)
+            A_lambda = A_Halpha * k_line / k_Halpha
+        else:
+            raise ValueError(
+                f"Dust law '{dust_law}' not supported. "
+                "Currently only 'calzetti' is implemented."
+            )
+
+        attenuation_factor = 10.0 ** (-0.4 * A_lambda)
+        attenuated_lum = luminosities * attenuation_factor
+
+        new_name = dataset_name.replace(
+            'luminosityEmissionLine', 'dustAttenuatedLuminosityEmissionLine'
+        )
+        attenuated_datasets[new_name] = attenuated_lum
+
+    return attenuated_datasets
+
+
+def save_dust_model_metadata(galacticus_file, dust_model, dust_params, dust_law):
+    """
+    Save dust model metadata to a top-level ``DustModel`` group in the HDF5 file.
+
+    Parameters
+    ----------
+    galacticus_file : str
+        Path to the Galacticus HDF5 file (will be modified in-place).
+    dust_model : str
+        Name of the dust model.
+    dust_params : dict
+        Dictionary of dust model parameters.
+    dust_law : str
+        Name of the attenuation law.
+    """
+    with h5py.File(galacticus_file, 'a') as f:
+        # Remove existing group if present
+        if 'DustModel' in f:
+            del f['DustModel']
+        grp = f.create_group('DustModel')
+        grp.attrs['dust_model'] = dust_model
+        grp.attrs['dust_law'] = dust_law
+        for param_name, param_value in dust_params.items():
+            grp.attrs[param_name] = param_value
+
+    print(f"Saved DustModel metadata to {galacticus_file}")
 
 
 def load_roman_bandpasses(filter_names):
@@ -133,7 +345,8 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                                  max_galaxies=None, component='total',
                                  save_to_input=False, copy_input=True,
                                  check_existing=True, obs_wavelengths=None,
-                                 n_jobs=1):
+                                 n_jobs=1, dust_model=None, dust_params=None,
+                                 dust_law='calzetti'):
     """
     Calculate magnitudes for all galaxies in a Galacticus catalog.
     
@@ -174,18 +387,36 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         Number of parallel worker processes to use. ``1`` (default) runs
         sequentially. ``-1`` uses all available CPU cores. Values greater
         than 1 request that exact number of workers.
+    dust_model : str, optional
+        Dust attenuation model to use for emission lines. When provided,
+        dust-attenuated magnitudes (``dustAttenuatedApparentMagnitudeRomanWFI:<filter>``)
+        and emission line luminosities
+        (``dustAttenuatedLuminosityEmissionLine*``) are also saved, together
+        with a ``DustModel`` metadata group.
+        Currently only ``'gb10_generalised'`` is supported. Default is None.
+    dust_params : dict, optional
+        Parameters for the dust model. Required when ``dust_model`` is not None.
+    dust_law : str, optional
+        Attenuation law to use. Default is ``'calzetti'``.
     
     Returns
     -------
     results : dict
         Dictionary with keys:
         - 'magnitudes': 2D array of shape (n_galaxies, n_filters)
+        - 'dust_magnitudes': 2D array of shape (n_galaxies, n_filters),
+          only present when dust_model is specified
+        - 'dust_emission_lines': dict mapping dataset name to attenuated array,
+          only present when dust_model is specified
         - 'filter_names': list of filter names
         - 'redshifts': array of galaxy redshifts
         - 'galaxy_indices': array of galaxy indices processed
         - 'output_file': path to file where magnitudes were saved (if applicable)
         - 'format_type': detected format ('lightcone' or 'fixed-time')
         - 'base_path': base path used in the HDF5 file
+        - 'dust_model': dust model name (only present when dust_model is specified)
+        - 'dust_params': dust model parameters (only present when dust_model is specified)
+        - 'dust_law': dust attenuation law (only present when dust_model is specified)
     """
     # Detect the format of the catalog
     format_type, base_path = detect_galacticus_format(galacticus_catalog)
@@ -261,6 +492,8 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     
     # Initialize arrays to store results
     magnitude_array = np.full((n_galaxies, n_filters), np.nan)
+    if dust_model is not None:
+        dust_magnitude_array = np.full((n_galaxies, n_filters), np.nan)
     redshifts = np.zeros(n_galaxies)
     
     # Read redshifts for all galaxies
@@ -271,7 +504,6 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
             redshifts[:] = f[f'{base_path}/nodeData/lightconeRedshiftObserved'][:n_galaxies]
     else:
         # Fixed-time: calculate redshift from outputTime
-        from SEDfromSFH import outputTime_to_redshift
         with h5py.File(working_file, 'r') as f:
             outputTime = f[base_path].attrs['outputTime']
             redshift = outputTime_to_redshift(outputTime)
@@ -285,6 +517,8 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     print(f"\nCalculating magnitudes in {n_filters} filters for {n_galaxies} galaxies...")
     if actual_n_jobs > 1:
         print(f"Using {actual_n_jobs} parallel worker processes")
+    if dust_model is not None:
+        print(f"Dust model: {dust_model} (computing dust-attenuated magnitudes too)")
     print("Progress: ", end='', flush=True)
 
     start_time = time.time()
@@ -301,7 +535,7 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                 print(f"{progress:.0f}% ", end='', flush=True)
 
             try:
-                # Calculate magnitudes for this galaxy
+                # Calculate dust-free magnitudes for this galaxy
                 mags = calc.calculate_magnitudes(
                     working_file,
                     galIndex=i,
@@ -313,6 +547,21 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                 # Store results in array
                 for j, filter_name in enumerate(filter_names):
                     magnitude_array[i, j] = mags[filter_name]
+
+                # Calculate dust-attenuated magnitudes if requested
+                if dust_model is not None:
+                    dust_mags = calc.calculate_magnitudes(
+                        working_file,
+                        galIndex=i,
+                        bandpasses=bandpasses,
+                        component=component,
+                        obs_wavelengths=obs_wavelengths,
+                        dust_model=dust_model,
+                        dust_params=dust_params,
+                        dust_law=dust_law,
+                    )
+                    for j, filter_name in enumerate(filter_names):
+                        dust_magnitude_array[i, j] = dust_mags[filter_name]
 
             except Exception as e:
                 print(f"\nWarning: Failed to process galaxy {i}: {e}")
@@ -327,20 +576,24 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         with multiprocessing.Pool(
             processes=actual_n_jobs,
             initializer=_init_worker,
-            initargs=(sed_template_file, filter_names, cosmology)
+            initargs=(sed_template_file, filter_names, cosmology,
+                      dust_model, dust_params, dust_law)
         ) as pool:
             n_done = 0
-            for i, mags in pool.imap_unordered(_process_galaxy_worker, worker_args):
+            for i, result in pool.imap_unordered(_process_galaxy_worker, worker_args):
                 n_done += 1
                 if n_done % max(1, n_galaxies // 20) == 0:
                     progress = n_done / n_galaxies * 100
                     elapsed = time.time() - start_time
                     rate = n_done / elapsed
                     print(f"{progress:.0f}% ", end='', flush=True)
-                if mags is not None:
+                if result is not None:
                     for j, filter_name in enumerate(filter_names):
-                        magnitude_array[i, j] = mags[filter_name]
-                # If mags is None the row stays as NaN (already initialised)
+                        magnitude_array[i, j] = result['mags'][filter_name]
+                    if dust_model is not None and 'dust_mags' in result:
+                        for j, filter_name in enumerate(filter_names):
+                            dust_magnitude_array[i, j] = result['dust_mags'][filter_name]
+                # If result is None the rows stay as NaN (already initialised)
     
     print("Done!")
     
@@ -356,6 +609,20 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         'format_type': format_type,
         'base_path': base_path
     }
+
+    # Add dust results if a dust model was specified
+    if dust_model is not None:
+        results['dust_magnitudes'] = dust_magnitude_array
+        results['dust_model'] = dust_model
+        results['dust_params'] = dust_params
+        results['dust_law'] = dust_law
+        print(f"\nCalculating dust-attenuated emission line luminosities...")
+        results['dust_emission_lines'] = calculate_dust_attenuated_emission_lines(
+            working_file, base_path, format_type,
+            dust_model, dust_params, dust_law,
+            n_galaxies=n_galaxies,
+        )
+        print(f"  Computed {len(results['dust_emission_lines'])} dust-attenuated emission line datasets")
     
     # Save to file
     if save_to_input:
@@ -451,8 +718,47 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
             # Add attributes
             dataset.attrs['comment'] = comment.encode('utf-8')
             dataset.attrs['filter'] = filter_name.encode('utf-8')
+
+        # Save dust-attenuated magnitudes if present
+        if 'dust_magnitudes' in results:
+            dust_comment = comment.replace(
+                "AB magnitude", "dust-attenuated AB magnitude"
+            )
+            dust_magnitude_array = results['dust_magnitudes']
+            for j, filter_name in enumerate(filter_names):
+                dust_path = f'{node_data_path}/dustAttenuatedApparentMagnitudeRomanWFI:{filter_name}'
+                if dust_path in f:
+                    print(f"  Deleting existing dataset: {dust_path}")
+                    del f[dust_path]
+                print(f"  Creating dataset: {dust_path}")
+                ds = f.create_dataset(dust_path, data=dust_magnitude_array[:, j])
+                ds.attrs['comment'] = dust_comment.encode('utf-8')
+                ds.attrs['filter'] = filter_name.encode('utf-8')
+
+        # Save dust-attenuated emission lines if present
+        if 'dust_emission_lines' in results:
+            for ds_name, attenuated_lum in results['dust_emission_lines'].items():
+                ds_path = f'{node_data_path}/{ds_name}'
+                if ds_path in f:
+                    print(f"  Deleting existing dataset: {ds_path}")
+                    del f[ds_path]
+                print(f"  Creating dataset: {ds_path}")
+                f.create_dataset(ds_path, data=attenuated_lum)
     
     print(f"Saved {len(filter_names)} magnitude datasets to {galacticus_file}")
+    if 'dust_magnitudes' in results:
+        print(f"Saved {len(filter_names)} dust-attenuated magnitude datasets to {galacticus_file}")
+    if 'dust_emission_lines' in results:
+        print(f"Saved {len(results['dust_emission_lines'])} dust-attenuated emission line datasets to {galacticus_file}")
+
+    # Save dust model metadata if a dust model was used
+    if 'dust_model' in results:
+        save_dust_model_metadata(
+            galacticus_file,
+            results['dust_model'],
+            results['dust_params'],
+            results['dust_law'],
+        )
 
 
 def save_magnitude_catalog(results, output_file):
@@ -536,6 +842,16 @@ def parse_arguments():
                        choices=['AB', 'ST', 'Vega'],
                        help='Magnitude system to use')
     
+    # Dust attenuation options
+    parser.add_argument('--dust-config', metavar='DUST_CONFIG',
+                       help='Path to a JSON file specifying the dust attenuation model.  '
+                            'When provided, dust-attenuated magnitudes '
+                            '(dustAttenuatedApparentMagnitudeRomanWFI:<filter>) and '
+                            'emission line luminosities '
+                            '(dustAttenuatedLuminosityEmissionLine*) are also saved, '
+                            'together with a DustModel metadata group.  '
+                            'Required JSON keys: dust_model, dust_params, dust_law.')
+    
     return parser.parse_args()
 
 
@@ -567,6 +883,20 @@ def main():
     if not os.path.exists(args.sed_template):
         print(f"\nError: SED template file not found: {args.sed_template}")
         sys.exit(1)
+    
+    # Load dust config if provided
+    dust_model = None
+    dust_params = None
+    dust_law = 'calzetti'
+    if args.dust_config:
+        if not os.path.exists(args.dust_config):
+            print(f"\nError: Dust config file not found: {args.dust_config}")
+            sys.exit(1)
+        print(f"\nLoading dust config from: {args.dust_config}")
+        dust_model, dust_params, dust_law = load_dust_config(args.dust_config)
+        print(f"  dust_model: {dust_model}")
+        print(f"  dust_law:   {dust_law}")
+        print(f"  dust_params: {dust_params}")
     
     # Create wavelength grid
     obs_wavelengths = np.linspace(args.wavelength_min, args.wavelength_max, 
@@ -605,7 +935,10 @@ def main():
         copy_input=copy_input,
         check_existing=check_existing,
         obs_wavelengths=obs_wavelengths,
-        n_jobs=args.n_jobs
+        n_jobs=args.n_jobs,
+        dust_model=dust_model,
+        dust_params=dust_params,
+        dust_law=dust_law,
     )
     
     if results is not None:
