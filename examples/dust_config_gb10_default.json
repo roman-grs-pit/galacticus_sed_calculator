@@ -1,0 +1,11 @@
+{
+    "dust_model": "gb10_generalised",
+    "dust_params": {
+        "delta_0": 0.275,
+        "delta_z": -1.614,
+        "delta_M": -0.834,
+        "delta_Mz": -0.708,
+        "attenuation_scatter": 0.0
+    },
+    "dust_law": "calzetti"
+}
