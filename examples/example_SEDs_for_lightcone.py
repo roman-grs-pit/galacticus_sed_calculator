@@ -3,13 +3,26 @@ Example demonstrating dust attenuation for emission lines.
 
 This example shows how to apply dust attenuation when generating galaxy spectra
 using the generalized GB10 (Garn & Best 2010) model and Calzetti attenuation law.
+
+It also demonstrates how to read the dust model configuration back from a
+Galacticus catalog that was processed with calculate_catalog_magnitudes.py
+using --dust-config.
 """
-import numpy as np
+import os
+import sys
+
 import astropy.units as u
+from astropy.cosmology import FlatLambdaCDM
+import matplotlib.pyplot as plt
+import numpy as np
+
 # import SEDfromSFH as sed - have changed structure of repository so this is now imported from galacticus_sed_calculator
 from galacticus_sed_calculator import SEDCalculator
-import matplotlib.pyplot as plt
-from astropy.cosmology import FlatLambdaCDM
+
+# read_dust_model_from_catalog reads dust_model / dust_params / dust_law that
+# were written by calculate_catalog_magnitudes.py --dust-config
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
+from calculate_catalog_magnitudes import read_dust_model_from_catalog
 
 # Initialize the SED calculator with a template file
 sed_template_file = '../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
@@ -21,14 +34,29 @@ sedCalc = SEDCalculator(sed_template_file, cosmology=unit)
 obs_wavelengths = np.linspace(0.5, 2.5, 1000)*u.micron #wavelengths to produce sed over
 high_res_wavelengths = np.linspace(1e4, 2e4, 5000)*u.angstrom
 
-# Parameters for the GB10 dust attenuation model
-dust_model = 'gb10_generalised'
-dust_params = {'delta_0': 0.2772142287561473,
- 'delta_z': -1.579233727951697,
- 'delta_M': -0.8180063760711892,
- 'delta_Mz': -0.5287832073987419,
- 'attenuation_scatter': 0.25}
-dust_law='calzetti'
+# ---------------------------------------------------------------------------
+# Option A: read dust model parameters from the catalog
+# (works when the catalog was processed with calculate_catalog_magnitudes.py
+#  using --dust-config)
+# ---------------------------------------------------------------------------
+try:
+    dust_model, dust_params, dust_law = read_dust_model_from_catalog(galacticus_file)
+    print("Dust model loaded from catalog:")
+except KeyError:
+    # Option B: fall back to manually specified parameters if the catalog has
+    # not yet been processed with --dust-config
+    print("No dust model found in catalog – using hard-coded parameters.")
+    dust_model = 'gb10_generalised'
+    dust_params = {'delta_0': 0.2772142287561473,
+                   'delta_z': -1.579233727951697,
+                   'delta_M': -0.8180063760711892,
+                   'delta_Mz': -0.5287832073987419,
+                   'attenuation_scatter': 0.25}
+    dust_law = 'calzetti'
+
+print(f"  dust_model : {dust_model}")
+print(f"  dust_law   : {dust_law}")
+print(f"  dust_params: {dust_params}")
 
 # Select a galaxy to analyze
 galaxy_index = 1

@@ -25,6 +25,7 @@ from calculate_catalog_magnitudes import (
     calculate_dust_attenuated_emission_lines,
     save_dust_model_metadata,
     save_magnitudes_to_galacticus_file,
+    read_dust_model_from_catalog,
 )
 
 # ---------------------------------------------------------------------------
@@ -343,6 +344,65 @@ class TestSaveMagnitudesWithDust(unittest.TestCase):
             self.assertNotIn('dustAttenuatedNodeData',
                              f['Lightcone/Output1'])
             self.assertNotIn('DustModel', f)
+
+
+# ---------------------------------------------------------------------------
+# Test: read_dust_model_from_catalog
+# ---------------------------------------------------------------------------
+
+class TestReadDustModelFromCatalog(unittest.TestCase):
+    """Tests for read_dust_model_from_catalog."""
+
+    def setUp(self):
+        self.tmp_dir = tempfile.mkdtemp()
+        self.hdf5_path = os.path.join(self.tmp_dir, 'catalog.hdf5')
+        _make_minimal_lightcone_hdf5(self.hdf5_path, n_gals=5)
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmp_dir, ignore_errors=True)
+
+    def _write_dust_group(self, dust_params=None):
+        """Helper: write a dustAttenuatedNodeData group with metadata."""
+        if dust_params is None:
+            dust_params = DUST_PARAMS
+        with h5py.File(self.hdf5_path, 'a') as f:
+            grp = f.require_group('Lightcone/Output1/dustAttenuatedNodeData')
+            save_dust_model_metadata(grp, DUST_MODEL, dust_params, DUST_LAW)
+
+    def test_returns_correct_values(self):
+        self._write_dust_group()
+        dust_model, dust_params, dust_law = read_dust_model_from_catalog(
+            self.hdf5_path, base_path='/Lightcone/Output1'
+        )
+        self.assertEqual(dust_model, DUST_MODEL)
+        self.assertEqual(dust_law, DUST_LAW)
+        self.assertAlmostEqual(dust_params['delta_0'], 0.275)
+        self.assertAlmostEqual(dust_params['delta_z'], -1.614)
+
+    def test_dust_params_is_dict(self):
+        """dust_params should be returned as a dict, not a raw JSON string."""
+        self._write_dust_group()
+        _, dust_params, _ = read_dust_model_from_catalog(
+            self.hdf5_path, base_path='/Lightcone/Output1'
+        )
+        self.assertIsInstance(dust_params, dict)
+
+    def test_raises_key_error_when_no_dust_group(self):
+        """Should raise KeyError when no dustAttenuatedNodeData group exists."""
+        with self.assertRaises(KeyError):
+            read_dust_model_from_catalog(
+                self.hdf5_path, base_path='/Lightcone/Output1'
+            )
+
+    def test_auto_detects_base_path(self):
+        """base_path=None should auto-detect via detect_galacticus_format."""
+        self._write_dust_group()
+        dust_model, dust_params, dust_law = read_dust_model_from_catalog(
+            self.hdf5_path  # no base_path supplied
+        )
+        self.assertEqual(dust_model, DUST_MODEL)
+        self.assertIsInstance(dust_params, dict)
 
 
 if __name__ == '__main__':
