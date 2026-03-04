@@ -2,7 +2,7 @@
 Tests for dust attenuation support in calculate_catalog_magnitudes.py.
 
 These tests cover:
-- load_dust_config: loading a JSON config file for the dust model
+- load_dust_config: loading a YAML config file for the dust model
 - calculate_dust_attenuated_emission_lines: vectorised emission-line attenuation
 - save_dust_model_metadata: writing dust model attributes onto an HDF5 group
 - save_magnitudes_to_galacticus_file: saving dust-attenuated datasets into the
@@ -17,6 +17,7 @@ import unittest
 
 import h5py
 import numpy as np
+import yaml
 
 from galacticus_sed_calculator.dust_attenuation import read_dust_model_from_catalog
 
@@ -72,11 +73,11 @@ class TestLoadDustConfig(unittest.TestCase):
 
     def _write_config(self, path, content):
         with open(path, 'w') as f:
-            json.dump(content, f)
+            yaml.dump(content, f)
 
     def test_valid_config_returns_correct_values(self):
         with tempfile.TemporaryDirectory() as tmp:
-            cfg_path = os.path.join(tmp, 'dust.json')
+            cfg_path = os.path.join(tmp, 'dust.yaml')
             self._write_config(cfg_path, {
                 'dust_model': DUST_MODEL,
                 'dust_params': DUST_PARAMS,
@@ -92,7 +93,7 @@ class TestLoadDustConfig(unittest.TestCase):
 
     def test_missing_key_raises_value_error(self):
         with tempfile.TemporaryDirectory() as tmp:
-            cfg_path = os.path.join(tmp, 'dust.json')
+            cfg_path = os.path.join(tmp, 'dust.yaml')
             # dust_law is missing
             self._write_config(cfg_path, {
                 'dust_model': DUST_MODEL,
@@ -104,12 +105,12 @@ class TestLoadDustConfig(unittest.TestCase):
 
     def test_nonexistent_file_raises_file_not_found(self):
         with self.assertRaises(FileNotFoundError):
-            load_dust_config('/tmp/does_not_exist_12345.json')
+            load_dust_config('/tmp/does_not_exist_12345.yaml')
 
     def test_random_uniform_index_parsed_when_present(self):
         """random_uniform_index should be returned as an int when in the config."""
         with tempfile.TemporaryDirectory() as tmp:
-            cfg_path = os.path.join(tmp, 'dust.json')
+            cfg_path = os.path.join(tmp, 'dust.yaml')
             self._write_config(cfg_path, {
                 'dust_model': DUST_MODEL,
                 'dust_params': DUST_PARAMS,

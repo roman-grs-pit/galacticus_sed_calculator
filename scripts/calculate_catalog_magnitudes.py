@@ -20,6 +20,7 @@ import sys
 import multiprocessing
 import json
 import re
+import yaml
 
 # Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -113,12 +114,12 @@ def _process_galaxy_worker(args):
 
 def load_dust_config(config_file):
     """
-    Load dust model configuration from a JSON file.
+    Load dust model configuration from a YAML file.
 
     Parameters
     ----------
     config_file : str
-        Path to a JSON file containing the dust model configuration.
+        Path to a YAML file containing the dust model configuration.
         Required keys: 'dust_model', 'dust_params', 'dust_law'.
         Optional key: 'random_uniform_index' (int) — column index into the
         ``nodeData/randomUniform`` dataset for reproducible scatter.
@@ -139,36 +140,33 @@ def load_dust_config(config_file):
     --------
     Example config file::
 
-        {
-            "dust_model": "gb10_generalised",
-            "dust_params": {
-                "delta_0": 0.275,
-                "delta_z": -1.614,
-                "delta_M": -0.834,
-                "delta_Mz": -0.708,
-                "attenuation_scatter": 0.0
-            },
-            "dust_law": "calzetti"
-        }
+        # Fiducial GB10 dust model — zero scatter
+        dust_model: gb10_generalised
+        dust_params:
+            delta_0: 0.275   # normalisation
+            delta_z: -1.614  # redshift slope
+            delta_M: -0.834  # mass slope
+            delta_Mz: -0.708 # cross term
+            attenuation_scatter: 0.0
+        dust_law: calzetti
 
     To enable reproducible per-galaxy scatter supply a non-zero
-    ``attenuation_scatter`` and add ``"random_uniform_index"``::
+    ``attenuation_scatter`` and add ``random_uniform_index``::
 
-        {
-            "dust_model": "gb10_generalised",
-            "dust_params": {
-                "delta_0": 0.275,
-                "delta_z": -1.614,
-                "delta_M": -0.834,
-                "delta_Mz": -0.708,
-                "attenuation_scatter": 0.3
-            },
-            "dust_law": "calzetti",
-            "random_uniform_index": 0
-        }
+        # GB10 dust model with scatter
+        dust_model: gb10_generalised
+        dust_params:
+            delta_0: 0.275
+            delta_z: -1.614
+            delta_M: -0.834
+            delta_Mz: -0.708
+            attenuation_scatter: 0.3
+        dust_law: calzetti
+        # Column index into nodeData/randomUniform for reproducible scatter
+        random_uniform_index: 0
     """
     with open(config_file, 'r') as f:
-        config = json.load(f)
+        config = yaml.safe_load(f)
 
     for key in ('dust_model', 'dust_params', 'dust_law'):
         if key not in config:
@@ -939,13 +937,13 @@ def parse_arguments():
     
     # Dust attenuation options
     parser.add_argument('--dust-config', metavar='DUST_CONFIG',
-                       help='Path to a JSON file specifying the dust attenuation model.  '
+                       help='Path to a YAML file specifying the dust attenuation model.  '
                             'When provided, dust-attenuated magnitudes '
-                            '(dustAttenuatedApparentMagnitudeRomanWFI:<filter>) and '
+                            '(dustAttenuatedNodeData/apparentMagnitudeRomanWFI:<filter>) and '
                             'emission line luminosities '
-                            '(dustAttenuatedLuminosityEmissionLine*) are also saved, '
-                            'together with a DustModel metadata group.  '
-                            'Required JSON keys: dust_model, dust_params, dust_law.')
+                            '(dustAttenuatedNodeData/luminosityEmissionLine*) are also saved, '
+                            'together with dust model metadata on the dustAttenuatedNodeData group.  '
+                            'Required YAML keys: dust_model, dust_params, dust_law.')
     
     return parser.parse_args()
 
