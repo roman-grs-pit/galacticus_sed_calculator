@@ -18,6 +18,8 @@ import unittest
 import h5py
 import numpy as np
 
+from galacticus_sed_calculator.dust_attenuation import read_dust_model_from_catalog
+
 # Make the scripts/ directory importable
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
 from calculate_catalog_magnitudes import (
@@ -25,7 +27,6 @@ from calculate_catalog_magnitudes import (
     calculate_dust_attenuated_emission_lines,
     save_dust_model_metadata,
     save_magnitudes_to_galacticus_file,
-    read_dust_model_from_catalog,
 )
 
 # ---------------------------------------------------------------------------

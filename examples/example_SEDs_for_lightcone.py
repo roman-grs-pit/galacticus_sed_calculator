@@ -8,9 +8,6 @@ It also demonstrates how to read the dust model configuration back from a
 Galacticus catalog that was processed with calculate_catalog_magnitudes.py
 using --dust-config.
 """
-import os
-import sys
-
 import astropy.units as u
 from astropy.cosmology import FlatLambdaCDM
 import matplotlib.pyplot as plt
@@ -18,11 +15,7 @@ import numpy as np
 
 # import SEDfromSFH as sed - have changed structure of repository so this is now imported from galacticus_sed_calculator
 from galacticus_sed_calculator import SEDCalculator
-
-# read_dust_model_from_catalog reads dust_model / dust_params / dust_law that
-# were written by calculate_catalog_magnitudes.py --dust-config
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
-from calculate_catalog_magnitudes import read_dust_model_from_catalog
+from galacticus_sed_calculator import read_dust_model_from_catalog
 
 # Initialize the SED calculator with a template file
 sed_template_file = '../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'

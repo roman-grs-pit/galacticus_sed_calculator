@@ -7,6 +7,9 @@ on galaxy properties (e.g., GB10 model) and attenuation curves that describe how
 dust extinction varies with wavelength (e.g., Calzetti law).
 """
 
+import json
+
+import h5py
 import numpy as np
 import astropy.units as u
 import astropy.constants as const
@@ -345,3 +348,68 @@ def _calzetti_k_lambda(wavelength_AA):
                             0.011 / wavelength_micron**3) + R_V
     
     return k_lambda
+
+
+def read_dust_model_from_catalog(galacticus_file, base_path=None):
+    """
+    Read dust model configuration from a Galacticus HDF5 catalog.
+
+    Reads the ``dust_model``, ``dust_params``, and ``dust_law`` attributes
+    that were written to the ``dustAttenuatedNodeData`` group by
+    ``calculate_catalog_magnitudes.py --dust-config``.
+
+    Parameters
+    ----------
+    galacticus_file : str
+        Path to the Galacticus HDF5 file.
+    base_path : str, optional
+        Base path within the file (e.g. ``'/Lightcone/Output1'``).  If
+        ``None``, the format is auto-detected and the first output group is
+        used.
+
+    Returns
+    -------
+    dust_model : str
+        Name of the dust model (e.g. ``'gb10_generalised'``).
+    dust_params : dict
+        Dictionary of dust model parameters.
+    dust_law : str
+        Name of the attenuation law (e.g. ``'calzetti'``).
+
+    Raises
+    ------
+    KeyError
+        If the ``dustAttenuatedNodeData`` group does not exist in the file
+        (i.e. no dust-attenuated quantities have been saved yet).
+
+    Examples
+    --------
+    >>> dust_model, dust_params, dust_law = read_dust_model_from_catalog(
+    ...     'catalog.hdf5'
+    ... )
+    >>> print(dust_model)
+    gb10_generalised
+    >>> print(dust_params['delta_0'])
+    0.275
+    """
+    if base_path is None:
+        # Import here to avoid a circular import (sed_calculator imports from
+        # this module; we only need detect_galacticus_format at call time).
+        from .sed_calculator import detect_galacticus_format
+        _, base_path = detect_galacticus_format(galacticus_file)
+
+    dust_group_path = f'{base_path}/dustAttenuatedNodeData'
+
+    with h5py.File(galacticus_file, 'r') as f:
+        if dust_group_path not in f:
+            raise KeyError(
+                f"No 'dustAttenuatedNodeData' group found at '{dust_group_path}' "
+                f"in '{galacticus_file}'. Run calculate_catalog_magnitudes.py "
+                "with --dust-config to generate dust-attenuated quantities first."
+            )
+        grp = f[dust_group_path]
+        dust_model = grp.attrs['dust_model']
+        dust_law = grp.attrs['dust_law']
+        dust_params = json.loads(grp.attrs['dust_params'])
+
+    return dust_model, dust_params, dust_law
