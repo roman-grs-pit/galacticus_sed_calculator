@@ -354,8 +354,9 @@ def read_dust_model_from_catalog(galacticus_file, base_path=None):
     """
     Read dust model configuration from a Galacticus HDF5 catalog.
 
-    Reads the ``dust_model``, ``dust_params``, and ``dust_law`` attributes
-    that were written to the ``dustAttenuatedNodeData`` group by
+    Reads the ``dust_model``, ``dust_params``, ``dust_law``, and
+    ``random_uniform_index`` attributes that were written to the
+    ``dustAttenuatedNodeData`` group by
     ``calculate_catalog_magnitudes.py --dust-config``.
 
     Parameters
@@ -375,6 +376,11 @@ def read_dust_model_from_catalog(galacticus_file, base_path=None):
         Dictionary of dust model parameters.
     dust_law : str
         Name of the attenuation law (e.g. ``'calzetti'``).
+    random_uniform_index : int or None
+        Column index into ``nodeData/randomUniform`` used for reproducible
+        per-galaxy scatter.  ``None`` if the attribute is absent (i.e. the
+        catalog was processed without scatter or before this feature was
+        added).
 
     Raises
     ------
@@ -384,13 +390,15 @@ def read_dust_model_from_catalog(galacticus_file, base_path=None):
 
     Examples
     --------
-    >>> dust_model, dust_params, dust_law = read_dust_model_from_catalog(
+    >>> dust_model, dust_params, dust_law, rui = read_dust_model_from_catalog(
     ...     'catalog.hdf5'
     ... )
     >>> print(dust_model)
     gb10_generalised
     >>> print(dust_params['delta_0'])
     0.275
+    >>> print(rui)  # None if not set, int otherwise
+    None
     """
     if base_path is None:
         # Import here to avoid a circular import (sed_calculator imports from
@@ -411,5 +419,10 @@ def read_dust_model_from_catalog(galacticus_file, base_path=None):
         dust_model = grp.attrs['dust_model']
         dust_law = grp.attrs['dust_law']
         dust_params = json.loads(grp.attrs['dust_params'])
+        random_uniform_index = (
+            int(grp.attrs['random_uniform_index'])
+            if 'random_uniform_index' in grp.attrs
+            else None
+        )
 
-    return dust_model, dust_params, dust_law
+    return dust_model, dust_params, dust_law, random_uniform_index

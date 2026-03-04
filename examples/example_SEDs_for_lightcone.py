@@ -33,7 +33,7 @@ high_res_wavelengths = np.linspace(1e4, 2e4, 5000)*u.angstrom
 #  using --dust-config)
 # ---------------------------------------------------------------------------
 try:
-    dust_model, dust_params, dust_law = read_dust_model_from_catalog(galacticus_file)
+    dust_model, dust_params, dust_law, random_uniform_index = read_dust_model_from_catalog(galacticus_file)
     print("Dust model loaded from catalog:")
 except KeyError:
     # Option B: fall back to manually specified parameters if the catalog has
@@ -46,10 +46,13 @@ except KeyError:
                    'delta_Mz': -0.5287832073987419,
                    'attenuation_scatter': 0.25}
     dust_law = 'calzetti'
+    random_uniform_index = None
 
 print(f"  dust_model : {dust_model}")
 print(f"  dust_law   : {dust_law}")
 print(f"  dust_params: {dust_params}")
+if random_uniform_index is not None:
+    print(f"  random_uniform_index: {random_uniform_index}")
 
 # Select a galaxy to analyze
 galaxy_index = 1

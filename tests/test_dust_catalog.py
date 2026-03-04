@@ -82,12 +82,13 @@ class TestLoadDustConfig(unittest.TestCase):
                 'dust_params': DUST_PARAMS,
                 'dust_law': DUST_LAW,
             })
-            dust_model, dust_params, dust_law = load_dust_config(cfg_path)
+            dust_model, dust_params, dust_law, random_uniform_index = load_dust_config(cfg_path)
 
         self.assertEqual(dust_model, DUST_MODEL)
         self.assertEqual(dust_law, DUST_LAW)
         self.assertEqual(dust_params['delta_0'], 0.275)
         self.assertAlmostEqual(dust_params['delta_z'], -1.614)
+        self.assertIsNone(random_uniform_index)
 
     def test_missing_key_raises_value_error(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -105,6 +106,18 @@ class TestLoadDustConfig(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             load_dust_config('/tmp/does_not_exist_12345.json')
 
+    def test_random_uniform_index_parsed_when_present(self):
+        """random_uniform_index should be returned as an int when in the config."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = os.path.join(tmp, 'dust.json')
+            self._write_config(cfg_path, {
+                'dust_model': DUST_MODEL,
+                'dust_params': DUST_PARAMS,
+                'dust_law': DUST_LAW,
+                'random_uniform_index': 2,
+            })
+            _, _, _, random_uniform_index = load_dust_config(cfg_path)
+        self.assertEqual(random_uniform_index, 2)
 
 # ---------------------------------------------------------------------------
 # Test: calculate_dust_attenuated_emission_lines
@@ -373,18 +386,19 @@ class TestReadDustModelFromCatalog(unittest.TestCase):
 
     def test_returns_correct_values(self):
         self._write_dust_group()
-        dust_model, dust_params, dust_law = read_dust_model_from_catalog(
+        dust_model, dust_params, dust_law, random_uniform_index = read_dust_model_from_catalog(
             self.hdf5_path, base_path='/Lightcone/Output1'
         )
         self.assertEqual(dust_model, DUST_MODEL)
         self.assertEqual(dust_law, DUST_LAW)
         self.assertAlmostEqual(dust_params['delta_0'], 0.275)
         self.assertAlmostEqual(dust_params['delta_z'], -1.614)
+        self.assertIsNone(random_uniform_index)
 
     def test_dust_params_is_dict(self):
         """dust_params should be returned as a dict, not a raw JSON string."""
         self._write_dust_group()
-        _, dust_params, _ = read_dust_model_from_catalog(
+        _, dust_params, _, _ = read_dust_model_from_catalog(
             self.hdf5_path, base_path='/Lightcone/Output1'
         )
         self.assertIsInstance(dust_params, dict)
@@ -399,11 +413,23 @@ class TestReadDustModelFromCatalog(unittest.TestCase):
     def test_auto_detects_base_path(self):
         """base_path=None should auto-detect via detect_galacticus_format."""
         self._write_dust_group()
-        dust_model, dust_params, dust_law = read_dust_model_from_catalog(
+        dust_model, dust_params, dust_law, _ = read_dust_model_from_catalog(
             self.hdf5_path  # no base_path supplied
         )
         self.assertEqual(dust_model, DUST_MODEL)
         self.assertIsInstance(dust_params, dict)
+
+    def test_random_uniform_index_round_trip(self):
+        """random_uniform_index stored in metadata should be read back correctly."""
+        with h5py.File(self.hdf5_path, 'a') as f:
+            grp = f.require_group('Lightcone/Output1/dustAttenuatedNodeData')
+            save_dust_model_metadata(grp, DUST_MODEL, DUST_PARAMS, DUST_LAW,
+                                     random_uniform_index=3)
+        _, _, _, random_uniform_index = read_dust_model_from_catalog(
+            self.hdf5_path, base_path='/Lightcone/Output1'
+        )
+        self.assertEqual(random_uniform_index, 3)
+        self.assertIsInstance(random_uniform_index, int)
 
 
 if __name__ == '__main__':
