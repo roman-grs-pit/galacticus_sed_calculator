@@ -33,26 +33,28 @@ high_res_wavelengths = np.linspace(1e4, 2e4, 5000)*u.angstrom
 #  using --dust-config)
 # ---------------------------------------------------------------------------
 try:
-    dust_model, dust_params, dust_law, random_uniform_index = read_dust_model_from_catalog(galacticus_file)
+    dust_model_specs = read_dust_model_from_catalog(galacticus_file)
     print("Dust model loaded from catalog:")
 except KeyError:
     # Option B: fall back to manually specified parameters if the catalog has
     # not yet been processed with --dust-config
     print("No dust model found in catalog – using hard-coded parameters.")
-    dust_model = 'gb10_generalised'
-    dust_params = {'delta_0': 0.2772142287561473,
-                   'delta_z': -1.579233727951697,
-                   'delta_M': -0.8180063760711892,
-                   'delta_Mz': -0.5287832073987419,
-                   'attenuation_scatter': 0.25}
-    dust_law = 'calzetti'
-    random_uniform_index = None
+    dust_model_specs = {
+        'dust_model': 'gb10_generalised',
+        'dust_params': {'delta_0': 0.2772142287561473,
+                        'delta_z': -1.579233727951697,
+                        'delta_M': -0.8180063760711892,
+                        'delta_Mz': -0.5287832073987419,
+                        'attenuation_scatter': 0.25},
+        'dust_law': 'calzetti',
+        'random_uniform_index': None,
+    }
 
-print(f"  dust_model : {dust_model}")
-print(f"  dust_law   : {dust_law}")
-print(f"  dust_params: {dust_params}")
-if random_uniform_index is not None:
-    print(f"  random_uniform_index: {random_uniform_index}")
+print(f"  dust_model : {dust_model_specs['dust_model']}")
+print(f"  dust_law   : {dust_model_specs['dust_law']}")
+print(f"  dust_params: {dust_model_specs['dust_params']}")
+if dust_model_specs['random_uniform_index'] is not None:
+    print(f"  random_uniform_index: {dust_model_specs['random_uniform_index']}")
 
 # Select a galaxy to analyze
 galaxy_index = 1
@@ -74,24 +76,19 @@ Note that there are two ways to add scatter in the amount of dust attenuation:
 2. Deterministic scatter using a random number from the Galacticus catalog: Instead of drawing a new random scatter value each time, you can use random numbers that are stored for each galaxy in the Galacticus catalog. This means that the scatter will be consistent for that particular galaxy each time you generate the spectrum, as it will always use the same random number from the catalog to determine the scatter. This catalog has 5 random numbers for each galaxy, so you can specify which one to use (e.g., random_uniform_index=2) to get a deterministic scatter value for that galaxy.
 """
 
-# Generate spectrum WITH dust attenuation (random scatter)
-print("\nGenerating spectrum with dust attenuation (random scatter)...")
-spectrum_with_dust = sedCalc.evaluate_total_spectrum(galacticus_file, galaxy_index, 
+# Generate spectrum WITH dust attenuation (using parameters loaded from catalog)
+print("\nGenerating spectrum with dust attenuation...")
+spectrum_with_dust = sedCalc.evaluate_total_spectrum(galacticus_file, galaxy_index,
                         obs_wavelengths=obs_wavelengths,
                         use_synphot=False,
-                        dust_model=dust_model, 
-                        dust_params=dust_params, 
-                        dust_law=dust_law)
+                        **dust_model_specs)
 
 # Generate spectrum WITH dust attenuation (scatter using random number from Galacticus catalog)
 print("\nGenerating spectrum with dust attenuation (scatter using random number from Galacticus catalog)...")
 spectrum_with_dust_deterministic = sedCalc.evaluate_total_spectrum(galacticus_file, galaxy_index, 
                         obs_wavelengths=obs_wavelengths, 
                         use_synphot=False,
-                        dust_model=dust_model, 
-                        dust_params=dust_params, 
-                        dust_law=dust_law,
-                        random_uniform_index=2)
+                        **{**dust_model_specs, 'random_uniform_index': 2})
 
 
 # Extract flux arrays for plotting

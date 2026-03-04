@@ -370,17 +370,16 @@ def read_dust_model_from_catalog(galacticus_file, base_path=None):
 
     Returns
     -------
-    dust_model : str
-        Name of the dust model (e.g. ``'gb10_generalised'``).
-    dust_params : dict
-        Dictionary of dust model parameters.
-    dust_law : str
-        Name of the attenuation law (e.g. ``'calzetti'``).
-    random_uniform_index : int or None
-        Column index into ``nodeData/randomUniform`` used for reproducible
-        per-galaxy scatter.  ``None`` if the attribute is absent (i.e. the
-        catalog was processed without scatter or before this feature was
-        added).
+    dict
+        Dictionary with keys ``'dust_model'``, ``'dust_params'``,
+        ``'dust_law'``, and ``'random_uniform_index'`` (``None`` if the
+        attribute is absent, i.e. the catalog was processed without scatter
+        or before this feature was added).  The keys match the keyword
+        arguments accepted by
+        :meth:`~galacticus_sed_calculator.SEDCalculator.evaluate_total_spectrum`
+        and
+        :meth:`~galacticus_sed_calculator.SEDCalculator.calculate_magnitudes`,
+        so the returned dict can be unpacked directly with ``**``.
 
     Raises
     ------
@@ -390,15 +389,15 @@ def read_dust_model_from_catalog(galacticus_file, base_path=None):
 
     Examples
     --------
-    >>> dust_model, dust_params, dust_law, rui = read_dust_model_from_catalog(
-    ...     'catalog.hdf5'
-    ... )
-    >>> print(dust_model)
+    >>> dust_model_specs = read_dust_model_from_catalog('catalog.hdf5')
+    >>> print(dust_model_specs['dust_model'])
     gb10_generalised
-    >>> print(dust_params['delta_0'])
+    >>> print(dust_model_specs['dust_params']['delta_0'])
     0.275
-    >>> print(rui)  # None if not set, int otherwise
-    None
+    >>> # Pass directly to evaluate_total_spectrum via ** unpacking:
+    >>> spectrum = sedCalc.evaluate_total_spectrum(
+    ...     fname, galIndex, obs_wavelengths=wavelengths, **dust_model_specs
+    ... )
     """
     if base_path is None:
         # Import here to avoid a circular import (sed_calculator imports from
@@ -425,4 +424,9 @@ def read_dust_model_from_catalog(galacticus_file, base_path=None):
             else None
         )
 
-    return dust_model, dust_params, dust_law, random_uniform_index
+    return {
+        'dust_model': dust_model,
+        'dust_params': dust_params,
+        'dust_law': dust_law,
+        'random_uniform_index': random_uniform_index,
+    }

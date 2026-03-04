@@ -386,22 +386,34 @@ class TestReadDustModelFromCatalog(unittest.TestCase):
 
     def test_returns_correct_values(self):
         self._write_dust_group()
-        dust_model, dust_params, dust_law, random_uniform_index = read_dust_model_from_catalog(
+        result = read_dust_model_from_catalog(
             self.hdf5_path, base_path='/Lightcone/Output1'
         )
-        self.assertEqual(dust_model, DUST_MODEL)
-        self.assertEqual(dust_law, DUST_LAW)
-        self.assertAlmostEqual(dust_params['delta_0'], 0.275)
-        self.assertAlmostEqual(dust_params['delta_z'], -1.614)
-        self.assertIsNone(random_uniform_index)
+        self.assertEqual(result['dust_model'], DUST_MODEL)
+        self.assertEqual(result['dust_law'], DUST_LAW)
+        self.assertAlmostEqual(result['dust_params']['delta_0'], 0.275)
+        self.assertAlmostEqual(result['dust_params']['delta_z'], -1.614)
+        self.assertIsNone(result['random_uniform_index'])
+
+    def test_returns_dict(self):
+        """read_dust_model_from_catalog should return a dict."""
+        self._write_dust_group()
+        result = read_dust_model_from_catalog(
+            self.hdf5_path, base_path='/Lightcone/Output1'
+        )
+        self.assertIsInstance(result, dict)
+        self.assertIn('dust_model', result)
+        self.assertIn('dust_params', result)
+        self.assertIn('dust_law', result)
+        self.assertIn('random_uniform_index', result)
 
     def test_dust_params_is_dict(self):
         """dust_params should be returned as a dict, not a raw JSON string."""
         self._write_dust_group()
-        _, dust_params, _, _ = read_dust_model_from_catalog(
+        result = read_dust_model_from_catalog(
             self.hdf5_path, base_path='/Lightcone/Output1'
         )
-        self.assertIsInstance(dust_params, dict)
+        self.assertIsInstance(result['dust_params'], dict)
 
     def test_raises_key_error_when_no_dust_group(self):
         """Should raise KeyError when no dustAttenuatedNodeData group exists."""
@@ -413,11 +425,11 @@ class TestReadDustModelFromCatalog(unittest.TestCase):
     def test_auto_detects_base_path(self):
         """base_path=None should auto-detect via detect_galacticus_format."""
         self._write_dust_group()
-        dust_model, dust_params, dust_law, _ = read_dust_model_from_catalog(
+        result = read_dust_model_from_catalog(
             self.hdf5_path  # no base_path supplied
         )
-        self.assertEqual(dust_model, DUST_MODEL)
-        self.assertIsInstance(dust_params, dict)
+        self.assertEqual(result['dust_model'], DUST_MODEL)
+        self.assertIsInstance(result['dust_params'], dict)
 
     def test_random_uniform_index_round_trip(self):
         """random_uniform_index stored in metadata should be read back correctly."""
@@ -425,11 +437,11 @@ class TestReadDustModelFromCatalog(unittest.TestCase):
             grp = f.require_group('Lightcone/Output1/dustAttenuatedNodeData')
             save_dust_model_metadata(grp, DUST_MODEL, DUST_PARAMS, DUST_LAW,
                                      random_uniform_index=3)
-        _, _, _, random_uniform_index = read_dust_model_from_catalog(
+        result = read_dust_model_from_catalog(
             self.hdf5_path, base_path='/Lightcone/Output1'
         )
-        self.assertEqual(random_uniform_index, 3)
-        self.assertIsInstance(random_uniform_index, int)
+        self.assertEqual(result['random_uniform_index'], 3)
+        self.assertIsInstance(result['random_uniform_index'], int)
 
 
 if __name__ == '__main__':
