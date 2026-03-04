@@ -803,7 +803,7 @@ class SEDCalculator:
         )
         return observed_sed
 
-    def evaluate_component_spectrum(self, filename, galIndex, component='disk', obs_wavelengths=None, include_emission_lines=True, lineFWHM=10*u.AA, minimumLineFlux=0, minimumLineWavelength = 0.9*u.micron, maximumLineWavelength = 2.03*u.micron, use_synphot=True, dust_model=None, dust_params=None, dust_law='calzetti', random_uniform_index=None):
+    def evaluate_component_spectrum(self, filename, galIndex, component='disk', obs_wavelengths=None, include_emission_lines=True, lineFWHM=10*u.AA, minimumLineFlux=0, minimumLineWavelength=None, maximumLineWavelength=None, use_synphot=True, dust_model=None, dust_params=None, dust_law='calzetti', random_uniform_index=None):
         """
         Evaluate the spectrum of a specified galaxy component.
 
@@ -839,12 +839,14 @@ class SEDCalculator:
             Can be supplied as a float (assumed to be in erg / (s cm^2)) or as an astropy Quantity in any valid
             flux unit.
             Default is 0 (include all lines with non-zero flux).
-        minimumLineWavelength : Quantity, optional
+        minimumLineWavelength : Quantity or None, optional
             The minimum observed wavelength for an emission line to be included in the spectrum.
-            Default is 0.9 micron.
-        maximumLineWavelength : Quantity, optional
+            If None (default), uses the minimum of ``obs_wavelengths`` when provided, otherwise
+            includes lines at all wavelengths.
+        maximumLineWavelength : Quantity or None, optional
             The maximum observed wavelength for an emission line to be included in the spectrum.
-            Default is 2.03 micron.
+            If None (default), uses the maximum of ``obs_wavelengths`` when provided, otherwise
+            includes lines at all wavelengths.
         use_synphot : bool, optional
             Whether to use synphot for spectrum generation. When True (default), returns a synphot.SourceSpectrum
             object. When False, uses direct numpy operations for faster performance and returns a tuple of
@@ -1011,6 +1013,17 @@ class SEDCalculator:
         
         if include_emission_lines:
             minimumLineFlux = minFlux(minimumLineFlux)
+            # Resolve None wavelength bounds to obs_wavelengths range (or all-inclusive)
+            if minimumLineWavelength is None:
+                if obs_wavelengths is not None:
+                    minimumLineWavelength = np.min(obs_wavelengths)
+                else:
+                    minimumLineWavelength = 0 * u.AA
+            if maximumLineWavelength is None:
+                if obs_wavelengths is not None:
+                    maximumLineWavelength = np.max(obs_wavelengths)
+                else:
+                    maximumLineWavelength = np.inf * u.AA
             # Get cached line metadata (names and wavelengths are same for all galaxies)
             lineNames, lineRestWavelengths, hdf5_paths = self._get_line_metadata(filename, component)
             
@@ -1048,7 +1061,7 @@ class SEDCalculator:
         component_spectrum = total_flux
         return component_spectrum
     
-    def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA, include_emission_lines=True, minimumLineFlux=0, minimumLineWavelength = 0.9*u.micron, maximumLineWavelength = 2.03*u.micron, use_synphot=True, dust_model=None, dust_params=None, dust_law='calzetti', random_uniform_index=None):
+    def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA, include_emission_lines=True, minimumLineFlux=0, minimumLineWavelength=None, maximumLineWavelength=None, use_synphot=True, dust_model=None, dust_params=None, dust_law='calzetti', random_uniform_index=None):
         components=['disk','spheroid']
         if includeAGN:
             components.append('AGN')    

@@ -7,6 +7,7 @@ import os
 import sys
 import h5py
 import numpy as np
+import astropy.units as u
 
 # Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -214,6 +215,106 @@ class TestIntegrationWithEvaluateComponentSpectrum(unittest.TestCase):
         finally:
             if os.path.exists(tmp_filename):
                 os.unlink(tmp_filename)
+
+
+class TestEmissionLineWavelengthDefaults(unittest.TestCase):
+    """Test the default behavior of minimumLineWavelength and maximumLineWavelength."""
+
+    def setUp(self):
+        """Set up test fixtures."""
+        test_dir = os.path.dirname(__file__)
+        parent_dir = os.path.dirname(test_dir)
+        self.sed_template_file = os.path.join(parent_dir, 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5')
+        self.galacticus_file = os.path.join(parent_dir, 'data/romanUNIT.hdf5')
+        self.calc = SEDCalculator(self.sed_template_file)
+
+    def test_default_line_wavelength_bounds_are_none(self):
+        """Test that minimumLineWavelength and maximumLineWavelength default to None."""
+        import inspect
+        sig = inspect.signature(self.calc.evaluate_component_spectrum)
+        self.assertIsNone(sig.parameters['minimumLineWavelength'].default)
+        self.assertIsNone(sig.parameters['maximumLineWavelength'].default)
+
+        sig_total = inspect.signature(self.calc.evaluate_total_spectrum)
+        self.assertIsNone(sig_total.parameters['minimumLineWavelength'].default)
+        self.assertIsNone(sig_total.parameters['maximumLineWavelength'].default)
+
+    def test_none_defaults_use_obs_wavelengths_range(self):
+        """Test that None defaults resolve to the obs_wavelengths range."""
+        # Use a narrow wavelength range that does NOT include the grism defaults
+        narrow_wavelengths = np.linspace(4000, 8000, 500) * u.AA
+
+        # Spectrum with defaults (None -> derived from obs_wavelengths)
+        spectrum_narrow = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=narrow_wavelengths,
+            include_emission_lines=True,
+        )
+
+        # Spectrum with explicit grism defaults (0.9–2.03 micron)
+        spectrum_grism = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=narrow_wavelengths,
+            include_emission_lines=True,
+            minimumLineWavelength=0.9 * u.micron,
+            maximumLineWavelength=2.03 * u.micron,
+        )
+
+        # Evaluate both at the narrow wavelengths
+        flux_narrow = spectrum_narrow(narrow_wavelengths, flux_unit='FNU')
+        flux_grism = spectrum_grism(narrow_wavelengths, flux_unit='FNU')
+
+        # With grism limits, emission lines are excluded from the 4000–8000 AA range,
+        # so both spectra should match (only continuum present in that range)
+        # The key check: both should succeed without error and return finite values
+        self.assertTrue(np.all(np.isfinite(flux_narrow.value)))
+        self.assertTrue(np.all(np.isfinite(flux_grism.value)))
+
+    def test_none_defaults_with_no_obs_wavelengths(self):
+        """Test that None defaults with no obs_wavelengths includes all lines."""
+        # When obs_wavelengths is None, all emission lines should be included
+        # (no wavelength filtering)
+        spectrum = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=None,
+            include_emission_lines=True,
+            minimumLineWavelength=None,
+            maximumLineWavelength=None,
+        )
+        self.assertIsNotNone(spectrum)
+
+    def test_explicit_values_still_work(self):
+        """Test that explicitly providing wavelength bounds still works as before."""
+        wavelengths = np.linspace(8000, 30000, 500) * u.AA
+        spectrum = self.calc.evaluate_component_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            component='disk',
+            obs_wavelengths=wavelengths,
+            include_emission_lines=True,
+            minimumLineWavelength=0.9 * u.micron,
+            maximumLineWavelength=2.03 * u.micron,
+        )
+        self.assertIsNotNone(spectrum)
+        self.assertTrue(hasattr(spectrum, 'waveset'))
+
+    def test_evaluate_total_spectrum_none_defaults(self):
+        """Test that evaluate_total_spectrum also has None defaults."""
+        wavelengths = np.linspace(4000, 24000, 500) * u.AA
+        spectrum = self.calc.evaluate_total_spectrum(
+            self.galacticus_file,
+            galIndex=0,
+            obs_wavelengths=wavelengths,
+            include_emission_lines=True,
+        )
+        self.assertIsNotNone(spectrum)
+        self.assertTrue(hasattr(spectrum, 'waveset'))
 
 
 class TestCalculateMagnitudes(unittest.TestCase):
