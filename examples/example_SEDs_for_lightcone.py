@@ -70,31 +70,23 @@ spectrum_no_dust = sedCalc.evaluate_total_spectrum(galacticus_file, galaxy_index
                         obs_wavelengths=obs_wavelengths,
                         use_synphot=False)
 
-"""
-Note that there are two ways to add scatter in the amount of dust attenuation:
-1. Random scatter: Each time you generate the spectrum, a new random scatter value is drawn from a normal distribution with the specified standard deviation (attenuation_scatter). This means that if you run the code multiple times, you'll get different spectra each time due to the random nature of the scatter.
-2. Deterministic scatter using a random number from the Galacticus catalog: Instead of drawing a new random scatter value each time, you can use random numbers that are stored for each galaxy in the Galacticus catalog. This means that the scatter will be consistent for that particular galaxy each time you generate the spectrum, as it will always use the same random number from the catalog to determine the scatter. This catalog has 5 random numbers for each galaxy, so you can specify which one to use (e.g., random_uniform_index=2) to get a deterministic scatter value for that galaxy.
-"""
-
-# Generate spectrum WITH dust attenuation (using parameters loaded from catalog)
+# Generate spectrum WITH dust attenuation using the loaded dust_model_specs.
+# The behaviour depends on the value of random_uniform_index in dust_model_specs:
+#   - If random_uniform_index is an integer (e.g. loaded from catalog or set
+#     manually), the scatter is drawn from the pre-stored uniform random numbers
+#     in the Galacticus catalog, giving fully reproducible results across runs.
+#   - If random_uniform_index is None and attenuation_scatter > 0, a fresh
+#     random draw is made each run, so spectra will differ between runs.
 print("\nGenerating spectrum with dust attenuation...")
 spectrum_with_dust = sedCalc.evaluate_total_spectrum(galacticus_file, galaxy_index,
                         obs_wavelengths=obs_wavelengths,
                         use_synphot=False,
                         **dust_model_specs)
 
-# Generate spectrum WITH dust attenuation (scatter using random number from Galacticus catalog)
-print("\nGenerating spectrum with dust attenuation (scatter using random number from Galacticus catalog)...")
-spectrum_with_dust_deterministic = sedCalc.evaluate_total_spectrum(galacticus_file, galaxy_index, 
-                        obs_wavelengths=obs_wavelengths, 
-                        use_synphot=False,
-                        **{**dust_model_specs, 'random_uniform_index': 2})
-
-
 # Extract flux arrays for plotting
 wavelengths_for_plot = np.linspace(8000, 30000, 2000) * u.AA
 flux_no_dust = spectrum_no_dust(wavelengths_for_plot, flux_unit='flam')
-flux_with_dust = spectrum_with_dust_deterministic(wavelengths_for_plot, flux_unit='flam')
+flux_with_dust = spectrum_with_dust(wavelengths_for_plot, flux_unit='flam')
 
 # Plot the comparison
 plt.figure(figsize=(12, 6))
