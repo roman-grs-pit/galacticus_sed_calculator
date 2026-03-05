@@ -110,7 +110,8 @@ def dust_attenuation_gb10_generalised(
     """
 
     # --- GB10 baseline ---
-    X = np.atleast_1d(np.log10(Mstar / 1e10))
+    Mstar_clip = np.clip(Mstar, 1e8, 1e11) 
+    X = np.atleast_1d(np.log10(Mstar_clip / 1e10))
     A_gb10 = 0.91 + 0.77 * X + 0.11 * X**2 - 0.09 * X**3
 
     # --- Redshift coordinate ---
