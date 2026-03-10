@@ -22,13 +22,32 @@ Example
         --redshift-min 0.05 --redshift-max 0.4 \\
         --magnitude-max 20.2 --magnitude-filter F158
 
+Dust handling
+-------------
+Dust attenuation is handled automatically from the input catalog:
+
+* If the input catalog has only a ``nodeData`` group, a dust-free SED is
+  computed and stored in ``<base_path>/nodeData/observedSED``.
+* If the input catalog also contains a ``dustAttenuatedNodeData`` group (i.e.
+  dust-attenuated magnitudes and emission lines were already computed by
+  ``calculate_catalog_magnitudes.py``), the script will:
+
+  1. Copy the sliced ``dustAttenuatedNodeData`` group to the output file.
+  2. Compute a dust-free SED → ``<base_path>/nodeData/observedSED``.
+  3. Compute a dust-attenuated SED using the parameters stored in
+     ``dustAttenuatedNodeData`` (read via
+     :func:`~galacticus_sed_calculator.dust_attenuation.read_dust_model_from_catalog`)
+     → ``<base_path>/dustAttenuatedNodeData/observedSED``.
+
 Output datasets added to the output catalog
 -------------------------------------------
 * ``<base_path>/nodeData/observedSEDWavelengths``
   1-D array of wavelengths in Angstroms, shape ``(n_wavelengths,)``.
 * ``<base_path>/nodeData/observedSED``
-  2-D array of observed-frame flux densities in erg/(s cm² Hz),
+  2-D array of dust-free observed-frame flux densities in erg/(s cm² Hz),
   shape ``(n_selected_galaxies, n_wavelengths)``.
+* ``<base_path>/dustAttenuatedNodeData/observedSED``  *(only when input has dustAttenuatedNodeData)*
+  2-D array of dust-attenuated observed-frame flux densities in erg/(s cm² Hz).
 """
 
 import json
@@ -50,6 +69,7 @@ from galacticus_sed_calculator.sed_calculator import (
     detect_galacticus_format,
     outputTime_to_redshift,
 )
+from galacticus_sed_calculator.dust_attenuation import read_dust_model_from_catalog
 
 # Default wavelength grid
 DEFAULT_WAVELENGTH_MIN = 4000    # Angstroms
@@ -225,7 +245,9 @@ def copy_galaxy_data(input_file, output_file, selected_indices, base_path):
     Create a new HDF5 catalog containing only the selected galaxies.
 
     All datasets inside the ``nodeData`` group are sliced to the selected
-    rows.  The ``Parameters`` group and all attributes on the parent groups
+    rows.  If the input catalog also contains a ``dustAttenuatedNodeData``
+    group at the same level, its datasets are sliced and copied in the same
+    way.  The ``Parameters`` group and all attributes on the parent groups
     along the path to ``nodeData`` are copied verbatim.  Provenance
     attributes recording the source file and selected indices are added to
     the output group.
@@ -262,25 +284,33 @@ def copy_galaxy_data(input_file, output_file, selected_indices, base_path):
             for key, val in src_group.attrs.items():
                 dst_group.attrs[key] = val
 
+        def _copy_group_sliced(src_group, dst_group):
+            """Copy all datasets in src_group, sliced to selected_indices."""
+            for ds_name in src_group.keys():
+                src_ds = src_group[ds_name]
+                data = src_ds[:]
+                new_data = data[selected_indices]
+                dst_ds = dst_group.create_dataset(
+                    ds_name, data=new_data,
+                    compression='gzip', compression_opts=4,
+                )
+                for key, val in src_ds.attrs.items():
+                    dst_ds.attrs[key] = val
+
         # Slice all nodeData datasets to the selected rows
         node_data_path = f'{base_path}/nodeData'
-        src_nd = src[node_data_path]
         dst_nd = dst.require_group(node_data_path)
+        _copy_group_sliced(src[node_data_path], dst_nd)
 
-        for ds_name in src_nd.keys():
-            src_ds = src_nd[ds_name]
-            data = src_ds[:]
-
-            # Slice along the first (galaxy) axis; handle 1-D and N-D arrays
-            new_data = data[selected_indices]
-
-            dst_ds = dst_nd.create_dataset(
-                ds_name, data=new_data,
-                compression='gzip', compression_opts=4,
-            )
-            # Preserve all dataset attributes (units, comments, etc.)
-            for key, val in src_ds.attrs.items():
-                dst_ds.attrs[key] = val
+        # Copy dustAttenuatedNodeData if it exists in the source
+        dust_nd_path = f'{base_path}/dustAttenuatedNodeData'
+        if dust_nd_path in src:
+            src_dust = src[dust_nd_path]
+            dst_dust = dst.require_group(dust_nd_path)
+            # Copy group-level attributes (dust model metadata)
+            for key, val in src_dust.attrs.items():
+                dst_dust.attrs[key] = val
+            _copy_group_sliced(src_dust, dst_dust)
 
         # Record provenance on the output group
         dst[base_path].attrs['downsampledFrom'] = input_file.encode('utf-8')
@@ -288,74 +318,43 @@ def copy_galaxy_data(input_file, output_file, selected_indices, base_path):
         dst[base_path].attrs['selectedIndices'] = selected_indices
 
 
-def calculate_and_save_seds(input_file, output_file, selected_indices, base_path,
-                             sed_template_file, obs_wavelengths,
-                             component='total', include_emission_lines=True,
-                             dust_model=None, dust_params=None,
-                             dust_law='calzetti', random_uniform_index=None,
-                             cosmology=None):
+def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
+                        calc, component, include_emission_lines,
+                        dust_model=None, dust_params=None,
+                        dust_law='calzetti', random_uniform_index=None):
     """
-    Calculate SEDs for selected galaxies and save them to the output file.
-
-    SEDs are evaluated from the *input* catalog (using the original galaxy
-    indices) and written into the *output* catalog.  The output file is
-    expected to have already been populated with galaxy data by
-    :func:`copy_galaxy_data`.
+    Compute SED flux-density arrays for the selected galaxies.
 
     Parameters
     ----------
     input_file : str
-        Path to the source Galacticus HDF5 file (used by the SED calculator).
-    output_file : str
-        Path to the output HDF5 file (where SEDs will be written).
-    selected_indices : array-like of int
-        Original (input-file) indices of the galaxies for which SEDs are
-        computed.
-    base_path : str
-        HDF5 base path (e.g. ``'/Lightcone/Output1'``).
-    sed_template_file : str
-        Path to the SED template HDF5 file for :class:`SEDCalculator`.
+        Path to the source Galacticus HDF5 file.
+    selected_indices : ndarray of int
+        Original (input-file) indices of the galaxies.
     obs_wavelengths : Quantity
-        Wavelength grid on which to evaluate the spectra (astropy Quantity,
-        assumed to be in Angstroms).
-    component : str, optional
-        Galaxy component: ``'total'`` (default) combines disk, spheroid, and
-        AGN; ``'disk'`` or ``'spheroid'`` select individual components.
-    include_emission_lines : bool, optional
-        Whether to include emission lines in the SED.  Default ``True``.
-    dust_model : str or None, optional
-        Dust attenuation model name passed to :class:`SEDCalculator`.
-    dust_params : dict or None, optional
+        Wavelength grid (astropy Quantity in Angstroms).
+    calc : SEDCalculator
+        An already-initialised :class:`SEDCalculator` instance.
+    component : str
+        ``'total'``, ``'disk'``, or ``'spheroid'``.
+    include_emission_lines : bool
+        Whether to include emission lines.
+    dust_model : str or None
+        Dust attenuation model name.
+    dust_params : dict or None
         Parameters for the dust model.
-    dust_law : str, optional
-        Attenuation law.  Default ``'calzetti'``.
-    random_uniform_index : int or None, optional
-        Column index into ``nodeData/randomUniform`` for reproducible scatter.
-    cosmology : astropy.cosmology or None, optional
-        Cosmology object.  Uses the UNIT cosmology by default.
+    dust_law : str
+        Attenuation law name.
+    random_uniform_index : int or None
+        Column index into ``nodeData/randomUniform``.
 
     Returns
     -------
-    seds : ndarray, shape (n_selected, n_wavelengths)
-        Flux-density values in units of erg/(s cm² Hz).
-    wavelengths_AA : ndarray, shape (n_wavelengths,)
-        Wavelength grid in Angstroms.
+    sed_array : ndarray, shape (n_selected, n_wavelengths)
     """
-    selected_indices = np.asarray(selected_indices)
     n_selected = len(selected_indices)
-
-    if cosmology is None:
-        cosmology = FlatLambdaCDM(H0=67.74, Om0=0.3089)
-    calc = SEDCalculator(sed_template_file, cosmology=cosmology)
-
-    wav_AA = obs_wavelengths.to_value(u.AA)
-    n_wav = len(wav_AA)
-
+    n_wav = len(obs_wavelengths)
     sed_array = np.full((n_selected, n_wav), np.nan)
-
-    start_time = time.time()
-    print(f"\nCalculating SEDs for {n_selected} galaxies...")
-    print("Progress: ", end='', flush=True)
 
     for out_idx, orig_idx in enumerate(selected_indices):
         if (out_idx + 1) % max(1, n_selected // 20) == 0:
@@ -387,7 +386,6 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
                     random_uniform_index=random_uniform_index,
                 )
 
-            # Evaluate on the requested wavelength grid
             fnu = spectrum(obs_wavelengths, flux_unit='FNU').to_value(
                 u.erg / (u.s * u.cm**2 * u.Hz)
             )
@@ -399,33 +397,51 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
                 f"{type(e).__name__}: {e}"
             )
 
-    print("Done!")
-    elapsed = time.time() - start_time
-    print(
-        f"Total SED calculation time: {elapsed:.1f} s "
-        f"({elapsed / max(n_selected, 1):.2f} s/galaxy)"
-    )
+    return sed_array
 
-    # ------------------------------------------------------------------
-    # Write to output file
-    # ------------------------------------------------------------------
-    node_data_path = f'{base_path}/nodeData'
+
+def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
+                         component, include_emission_lines,
+                         dust_model=None, dust_law=None, dust_params=None):
+    """
+    Write wavelength grid and SED array into an HDF5 group.
+
+    Parameters
+    ----------
+    output_file : str
+        Path to the output HDF5 file (opened in append mode).
+    group_path : str
+        Full HDF5 path to the target group (e.g.
+        ``'/Lightcone/Output1/nodeData'`` or
+        ``'/Lightcone/Output1/dustAttenuatedNodeData'``).
+    wav_AA : ndarray, shape (n_wavelengths,)
+        Wavelength grid in Angstroms.
+    sed_array : ndarray, shape (n_galaxies, n_wavelengths)
+        Flux-density values in erg/(s cm² Hz).
+    component : str
+        Galaxy component used for the SED.
+    include_emission_lines : bool
+        Whether emission lines were included.
+    dust_model : str or None
+        Dust model name (stored as attribute when not None).
+    dust_law : str or None
+        Attenuation law name (stored as attribute when not None).
+    dust_params : dict or None
+        Dust model parameters (stored as JSON attribute when not None).
+    """
+    n_selected, n_wav = sed_array.shape
     with h5py.File(output_file, 'a') as f:
-        nd = f.require_group(node_data_path)
+        grp = f.require_group(group_path)
 
-        # Wavelength axis (common for all galaxies in this catalog)
-        if 'observedSEDWavelengths' in nd:
-            del nd['observedSEDWavelengths']
-        wav_ds = nd.create_dataset('observedSEDWavelengths', data=wav_AA)
+        if 'observedSEDWavelengths' in grp:
+            del grp['observedSEDWavelengths']
+        wav_ds = grp.create_dataset('observedSEDWavelengths', data=wav_AA)
         wav_ds.attrs['units'] = b'Angstroms'
-        wav_ds.attrs['description'] = (
-            b'Wavelength grid for observed-frame SEDs'
-        )
+        wav_ds.attrs['description'] = b'Wavelength grid for observed-frame SEDs'
 
-        # SED flux-density array [n_galaxies x n_wavelengths]
-        if 'observedSED' in nd:
-            del nd['observedSED']
-        sed_ds = nd.create_dataset(
+        if 'observedSED' in grp:
+            del grp['observedSED']
+        sed_ds = grp.create_dataset(
             'observedSED', data=sed_array,
             compression='gzip', compression_opts=4,
         )
@@ -434,19 +450,151 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
         sed_ds.attrs['include_emission_lines'] = b'True' if include_emission_lines else b'False'
         if dust_model is not None:
             sed_ds.attrs['dust_model'] = dust_model.encode('utf-8')
+        if dust_law is not None:
             sed_ds.attrs['dust_law'] = dust_law.encode('utf-8')
-            if dust_params is not None:
-                sed_ds.attrs['dust_params'] = json.dumps(dust_params).encode('utf-8')
+        if dust_params is not None:
+            sed_ds.attrs['dust_params'] = json.dumps(dust_params).encode('utf-8')
         sed_ds.attrs['description'] = (
             b'Observed-frame flux-density SED for each galaxy, '
             b'shape (n_galaxies, n_wavelengths). Units: erg/(s cm^2 Hz).'
         )
 
-    print(f"\nSaved SED datasets to {output_file}")
+    print(f"\nSaved SED datasets to {group_path} in {output_file}")
     print(f"  observedSEDWavelengths: shape ({n_wav},)")
     print(f"  observedSED:            shape ({n_selected}, {n_wav})")
 
-    return sed_array, wav_AA
+
+def calculate_and_save_seds(input_file, output_file, selected_indices, base_path,
+                             sed_template_file, obs_wavelengths,
+                             component='total', include_emission_lines=True,
+                             cosmology=None):
+    """
+    Calculate SEDs for selected galaxies and save them to the output file.
+
+    Dust attenuation is handled automatically from the output file.  If the
+    output file already has a ``dustAttenuatedNodeData`` group at
+    ``base_path`` (copied from the input catalog by :func:`copy_galaxy_data`),
+    the dust model parameters are read from that group's attributes and a
+    dust-attenuated SED is computed and stored there in addition to the
+    dust-free SED in ``nodeData``.
+
+    SEDs are evaluated from the *input* catalog (using the original galaxy
+    indices) and written into the *output* catalog.  The output file is
+    expected to have already been populated with galaxy data by
+    :func:`copy_galaxy_data`.
+
+    Parameters
+    ----------
+    input_file : str
+        Path to the source Galacticus HDF5 file (used by the SED calculator).
+    output_file : str
+        Path to the output HDF5 file (where SEDs will be written).
+    selected_indices : array-like of int
+        Original (input-file) indices of the galaxies for which SEDs are
+        computed.
+    base_path : str
+        HDF5 base path (e.g. ``'/Lightcone/Output1'``).
+    sed_template_file : str
+        Path to the SED template HDF5 file for :class:`SEDCalculator`.
+    obs_wavelengths : Quantity
+        Wavelength grid on which to evaluate the spectra (astropy Quantity,
+        assumed to be in Angstroms).
+    component : str, optional
+        Galaxy component: ``'total'`` (default) combines disk, spheroid, and
+        AGN; ``'disk'`` or ``'spheroid'`` select individual components.
+    include_emission_lines : bool, optional
+        Whether to include emission lines in the SED.  Default ``True``.
+    cosmology : astropy.cosmology or None, optional
+        Cosmology object.  Uses the UNIT cosmology by default.
+
+    Returns
+    -------
+    seds : ndarray, shape (n_selected, n_wavelengths)
+        Dust-free flux-density values in units of erg/(s cm² Hz).
+    wavelengths_AA : ndarray, shape (n_wavelengths,)
+        Wavelength grid in Angstroms.
+    """
+    selected_indices = np.asarray(selected_indices)
+    n_selected = len(selected_indices)
+
+    if cosmology is None:
+        cosmology = FlatLambdaCDM(H0=67.74, Om0=0.3089)
+    calc = SEDCalculator(sed_template_file, cosmology=cosmology)
+
+    wav_AA = obs_wavelengths.to_value(u.AA)
+
+    # Check if dust model parameters are available in the output file
+    dust_config = None
+    dust_nd_path = f'{base_path}/dustAttenuatedNodeData'
+    with h5py.File(output_file, 'r') as f:
+        if dust_nd_path in f:
+            try:
+                dust_config = read_dust_model_from_catalog(
+                    output_file, base_path=base_path
+                )
+            except (KeyError, ValueError, AttributeError):
+                dust_config = None
+
+    # ------------------------------------------------------------------
+    # Compute dust-free SEDs
+    # ------------------------------------------------------------------
+    start_time = time.time()
+    print(f"\nCalculating dust-free SEDs for {n_selected} galaxies...")
+    print("Progress: ", end='', flush=True)
+
+    sed_free = _compute_sed_array(
+        input_file, selected_indices, obs_wavelengths, calc,
+        component, include_emission_lines,
+        dust_model=None, dust_params=None,
+    )
+    print("Done!")
+    elapsed = time.time() - start_time
+    print(
+        f"Dust-free SED time: {elapsed:.1f} s "
+        f"({elapsed / max(n_selected, 1):.2f} s/galaxy)"
+    )
+
+    _write_sed_to_group(
+        output_file, f'{base_path}/nodeData', wav_AA, sed_free,
+        component, include_emission_lines,
+    )
+
+    # ------------------------------------------------------------------
+    # Compute dust-attenuated SEDs (only when dust params are available)
+    # ------------------------------------------------------------------
+    if dust_config is not None:
+        print(
+            f"\nCalculating dust-attenuated SEDs "
+            f"(model: {dust_config['dust_model']}, "
+            f"law: {dust_config['dust_law']})..."
+        )
+        print("Progress: ", end='', flush=True)
+
+        start_time = time.time()
+        sed_dust = _compute_sed_array(
+            input_file, selected_indices, obs_wavelengths, calc,
+            component, include_emission_lines,
+            dust_model=dust_config['dust_model'],
+            dust_params=dust_config['dust_params'],
+            dust_law=dust_config['dust_law'],
+            random_uniform_index=dust_config.get('random_uniform_index'),
+        )
+        print("Done!")
+        elapsed = time.time() - start_time
+        print(
+            f"Dust-attenuated SED time: {elapsed:.1f} s "
+            f"({elapsed / max(n_selected, 1):.2f} s/galaxy)"
+        )
+
+        _write_sed_to_group(
+            output_file, dust_nd_path, wav_AA, sed_dust,
+            component, include_emission_lines,
+            dust_model=dust_config['dust_model'],
+            dust_law=dust_config['dust_law'],
+            dust_params=dust_config['dust_params'],
+        )
+
+    return sed_free, wav_AA
 
 
 def create_downsampled_catalog(galacticus_catalog, sed_template_file,
@@ -457,9 +605,6 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
                                obs_wavelengths=None,
                                component='total',
                                include_emission_lines=True,
-                               dust_model=None, dust_params=None,
-                               dust_law='calzetti',
-                               random_uniform_index=None,
                                cosmology=None):
     """
     Create a downsampled Galacticus catalog with SEDs.
@@ -467,6 +612,12 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
     Applies selection cuts to the input catalog, copies the matching galaxies
     (including all their data and metadata) to a new HDF5 file, and then
     calculates and stores an observed-frame SED for each selected galaxy.
+
+    Dust attenuation is handled automatically.  If the input catalog has a
+    ``dustAttenuatedNodeData`` group, its contents (sliced to the selected
+    galaxies) are copied to the output file and an additional dust-attenuated
+    SED is stored there.  The dust parameters are read from the catalog using
+    :func:`~galacticus_sed_calculator.dust_attenuation.read_dust_model_from_catalog`.
 
     Parameters
     ----------
@@ -495,14 +646,6 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
         ``'spheroid'``).  Default ``'total'``.
     include_emission_lines : bool, optional
         Include emission lines in the SED.  Default ``True``.
-    dust_model : str or None, optional
-        Dust attenuation model name; passed to :class:`SEDCalculator`.
-    dust_params : dict or None, optional
-        Parameters for the dust model.
-    dust_law : str, optional
-        Attenuation law.  Default ``'calzetti'``.
-    random_uniform_index : int or None, optional
-        Column index into ``nodeData/randomUniform`` for reproducible scatter.
     cosmology : astropy.cosmology or None, optional
         Cosmology to use.  Defaults to
         ``FlatLambdaCDM(H0=67.74, Om0=0.3089)``.
@@ -512,8 +655,9 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
     results : dict
         Summary with keys: ``'selected_indices'``, ``'n_selected'``,
         ``'output_file'``, ``'format_type'``, ``'base_path'``,
-        ``'n_wavelengths'``.  When no galaxies pass the cuts,
-        ``'output_file'`` is ``None`` and ``'n_wavelengths'`` is absent.
+        ``'n_wavelengths'``, ``'has_dust'``.  When no galaxies pass the
+        cuts, ``'output_file'`` is ``None`` and ``'n_wavelengths'`` and
+        ``'has_dust'`` are absent.
     """
     format_type, base_path = detect_galacticus_format(galacticus_catalog)
     print(f"\nDetected format: {format_type}")
@@ -528,6 +672,16 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
 
     if cosmology is None:
         cosmology = FlatLambdaCDM(H0=67.74, Om0=0.3089)
+
+    # Detect whether the input catalog has dust-attenuated data
+    dust_nd_path = f'{base_path}/dustAttenuatedNodeData'
+    with h5py.File(galacticus_catalog, 'r') as f:
+        has_dust = dust_nd_path in f
+    if has_dust:
+        print("Detected dustAttenuatedNodeData in input catalog - will compute "
+              "dust-attenuated SEDs.")
+    else:
+        print("No dustAttenuatedNodeData found - computing dust-free SEDs only.")
 
     # ------------------------------------------------------------------
     # Step 1: Filter galaxies
@@ -574,10 +728,6 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
         obs_wavelengths=obs_wavelengths,
         component=component,
         include_emission_lines=include_emission_lines,
-        dust_model=dust_model,
-        dust_params=dust_params,
-        dust_law=dust_law,
-        random_uniform_index=random_uniform_index,
         cosmology=cosmology,
     )
 
@@ -588,6 +738,7 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
         'format_type': format_type,
         'base_path': base_path,
         'n_wavelengths': len(wav_AA),
+        'has_dust': has_dust,
     }
 
 
@@ -716,14 +867,6 @@ def parse_arguments():
         '--wavelength-npoints', type=int, default=DEFAULT_WAVELENGTH_NPOINTS,
         help='Number of points in the wavelength grid.',
     )
-    sed_group.add_argument(
-        '--dust-config', metavar='DUST_CONFIG',
-        help=(
-            'Path to a YAML file specifying dust attenuation (same format '
-            'as used by calculate_catalog_magnitudes.py).  Required keys: '
-            'dust_model, dust_params, dust_law.'
-        ),
-    )
 
     return parser.parse_args()
 
@@ -758,24 +901,6 @@ def main():
     if args.property_cuts:
         property_cuts = parse_property_cuts(args.property_cuts)
 
-    # Load dust config if provided
-    dust_model = None
-    dust_params = None
-    dust_law = 'calzetti'
-    random_uniform_index = None
-    if args.dust_config:
-        if not os.path.exists(args.dust_config):
-            print(f'\nError: Dust config file not found: {args.dust_config}')
-            sys.exit(1)
-        # Re-use the loader from calculate_catalog_magnitudes
-        from calculate_catalog_magnitudes import load_dust_config
-        dust_model, dust_params, dust_law, random_uniform_index = (
-            load_dust_config(args.dust_config)
-        )
-        print(f'\nDust model:  {dust_model}')
-        print(f'Dust law:    {dust_law}')
-        print(f'Dust params: {dust_params}')
-
     obs_wavelengths = np.linspace(
         args.wavelength_min, args.wavelength_max, args.wavelength_npoints
     ) * u.AA
@@ -792,10 +917,6 @@ def main():
         obs_wavelengths=obs_wavelengths,
         component=args.component,
         include_emission_lines=not args.no_emission_lines,
-        dust_model=dust_model,
-        dust_params=dust_params,
-        dust_law=dust_law,
-        random_uniform_index=random_uniform_index,
     )
 
     if results and results['n_selected'] > 0:

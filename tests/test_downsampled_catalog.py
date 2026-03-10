@@ -71,6 +71,44 @@ def _make_lightcone_catalog(path, n_gals=20, seed=0):
     return redshifts, mags_f158, disk_masses
 
 
+_DUST_PARAMS = {
+    'delta_0': 0.275,
+    'delta_z': -1.614,
+    'delta_M': -0.834,
+    'delta_Mz': -0.708,
+    'attenuation_scatter': 0.0,
+}
+
+
+def _add_dust_attenuated_node_data(path, n_gals, base_path='/Lightcone/Output1'):
+    """
+    Add a dustAttenuatedNodeData group with metadata to an existing HDF5 file.
+
+    Returns the dust magnitude array that was written.
+    """
+    import json as _json
+    rng = np.random.default_rng(99)
+    dust_mags = rng.uniform(24.0, 26.0, n_gals)
+
+    with h5py.File(path, 'a') as f:
+        dust_nd = f.require_group(f'{base_path}/dustAttenuatedNodeData')
+        dust_nd.attrs['dust_model'] = 'gb10_generalised'
+        dust_nd.attrs['dust_law'] = 'calzetti'
+        dust_nd.attrs['dust_params'] = _json.dumps(_DUST_PARAMS)
+
+        ds = dust_nd.create_dataset(
+            'apparentMagnitudeRomanWFI:F158', data=dust_mags
+        )
+        ds.attrs['filter'] = b'F158'
+        # Add a dummy emission-line dataset
+        dust_nd.create_dataset(
+            'luminosityEmissionLineDisk:balmerAlpha6565',
+            data=rng.uniform(1e40, 1e42, n_gals),
+        )
+
+    return dust_mags
+
+
 def _make_fixed_time_catalog(path, n_gals=10, output_time=7.0, seed=1):
     """Create a minimal fixed-time-format HDF5 file for testing."""
     rng = np.random.default_rng(seed)
@@ -385,6 +423,56 @@ class TestCopyGalaxyData(unittest.TestCase):
             n = len(f['Lightcone/Output1/nodeData/diskMassStellar'][:])
         self.assertEqual(n, 10)
 
+    def test_no_dust_group_when_source_has_none(self):
+        """If the source has no dustAttenuatedNodeData, neither should the output."""
+        copy_galaxy_data(self.src, self.dst, np.arange(5), '/Lightcone/Output1')
+        with h5py.File(self.dst, 'r') as f:
+            self.assertNotIn('dustAttenuatedNodeData', f['Lightcone/Output1'])
+
+    def test_dust_group_copied_when_present(self):
+        """dustAttenuatedNodeData must be copied when present in source."""
+        _add_dust_attenuated_node_data(self.src, n_gals=10)
+        selected = np.array([0, 2, 4])
+        copy_galaxy_data(self.src, self.dst, selected, '/Lightcone/Output1')
+        with h5py.File(self.dst, 'r') as f:
+            self.assertIn('dustAttenuatedNodeData', f['Lightcone/Output1'])
+
+    def test_dust_datasets_sliced_correctly(self):
+        """Datasets in dustAttenuatedNodeData must be sliced to selected rows."""
+        dust_mags = _add_dust_attenuated_node_data(self.src, n_gals=10)
+        selected = np.array([1, 3, 7])
+        copy_galaxy_data(self.src, self.dst, selected, '/Lightcone/Output1')
+        with h5py.File(self.dst, 'r') as f:
+            dst_mags = f[
+                'Lightcone/Output1/dustAttenuatedNodeData/'
+                'apparentMagnitudeRomanWFI:F158'
+            ][:]
+        np.testing.assert_array_almost_equal(dst_mags, dust_mags[selected])
+
+    def test_dust_group_size_matches_selection(self):
+        """Copied dustAttenuatedNodeData rows == number of selected galaxies."""
+        _add_dust_attenuated_node_data(self.src, n_gals=10)
+        selected = np.array([0, 5, 9])
+        copy_galaxy_data(self.src, self.dst, selected, '/Lightcone/Output1')
+        with h5py.File(self.dst, 'r') as f:
+            n = len(f[
+                'Lightcone/Output1/dustAttenuatedNodeData/'
+                'apparentMagnitudeRomanWFI:F158'
+            ][:])
+        self.assertEqual(n, 3)
+
+    def test_dust_group_metadata_attributes_preserved(self):
+        """Dust model attributes on dustAttenuatedNodeData must be preserved."""
+        _add_dust_attenuated_node_data(self.src, n_gals=10)
+        selected = np.arange(5)
+        copy_galaxy_data(self.src, self.dst, selected, '/Lightcone/Output1')
+        with h5py.File(self.dst, 'r') as f:
+            grp = f['Lightcone/Output1/dustAttenuatedNodeData']
+            dm = grp.attrs['dust_model']
+            if isinstance(dm, bytes):
+                dm = dm.decode('utf-8')
+            self.assertEqual(dm, 'gb10_generalised')
+
 
 # ---------------------------------------------------------------------------
 # Tests for parse_property_cuts
@@ -609,6 +697,79 @@ class TestCalculateAndSaveSeds(unittest.TestCase):
             self.assertEqual(units_attr, 'erg/(s cm^2 Hz)')
             self.assertEqual(component_attr, 'disk')
 
+    def test_dust_attenuated_sed_written_when_dust_group_present(self):
+        """When the output file has dustAttenuatedNodeData, a dust SED is written."""
+        from create_downsampled_catalog import calculate_and_save_seds
+        from galacticus_sed_calculator.sed_calculator import (
+            detect_galacticus_format,
+        )
+
+        output_file = os.path.join(self.tmp_dir, 'seds_dust.hdf5')
+        format_type, base_path = detect_galacticus_format(
+            self.galacticus_file
+        )
+        selected = np.array([0])
+
+        # Copy the galaxy data to create the output file
+        copy_galaxy_data(
+            self.galacticus_file, output_file, selected, base_path
+        )
+
+        # Manually add a dustAttenuatedNodeData group with dust model metadata
+        # (simulating a catalog that had dust magnitudes computed)
+        import json as _json
+        with h5py.File(output_file, 'a') as f:
+            grp = f.require_group(f'{base_path}/dustAttenuatedNodeData')
+            grp.attrs['dust_model'] = 'gb10_generalised'
+            grp.attrs['dust_law'] = 'calzetti'
+            grp.attrs['dust_params'] = _json.dumps(_DUST_PARAMS)
+
+        obs_wav = np.linspace(8000, 14000, 20) * u.AA
+        calculate_and_save_seds(
+            self.galacticus_file, output_file, selected, base_path,
+            sed_template_file=self.sed_template,
+            obs_wavelengths=obs_wav,
+            component='total',
+            include_emission_lines=False,
+        )
+
+        with h5py.File(output_file, 'r') as f:
+            # Dust-free SED must be in nodeData
+            self.assertIn('observedSED', f[f'{base_path}/nodeData'])
+            # Dust-attenuated SED must be in dustAttenuatedNodeData
+            dust_grp = f[f'{base_path}/dustAttenuatedNodeData']
+            self.assertIn('observedSED', dust_grp)
+            self.assertIn('observedSEDWavelengths', dust_grp)
+
+    def test_no_dust_attenuated_sed_without_dust_group(self):
+        """When output has no dustAttenuatedNodeData, no dust SED is written."""
+        from create_downsampled_catalog import calculate_and_save_seds
+        from galacticus_sed_calculator.sed_calculator import (
+            detect_galacticus_format,
+        )
+
+        output_file = os.path.join(self.tmp_dir, 'seds_no_dust.hdf5')
+        format_type, base_path = detect_galacticus_format(
+            self.galacticus_file
+        )
+        selected = np.array([0])
+
+        copy_galaxy_data(
+            self.galacticus_file, output_file, selected, base_path
+        )
+
+        obs_wav = np.linspace(8000, 14000, 20) * u.AA
+        calculate_and_save_seds(
+            self.galacticus_file, output_file, selected, base_path,
+            sed_template_file=self.sed_template,
+            obs_wavelengths=obs_wav,
+            component='total',
+            include_emission_lines=False,
+        )
+
+        with h5py.File(output_file, 'r') as f:
+            self.assertNotIn('dustAttenuatedNodeData', f[base_path])
+
 
 # ---------------------------------------------------------------------------
 # Integration test for create_downsampled_catalog
@@ -674,11 +835,16 @@ class TestCreateDownsampledCatalogIntegration(unittest.TestCase):
         expected_n = int(np.sum((all_z >= z_min) & (all_z <= z_max)))
         self.assertEqual(results['n_selected'], expected_n)
         self.assertTrue(os.path.exists(output_file))
+        self.assertIn('has_dust', results)
 
+        # Check whether the real catalog has dust data and assert accordingly
         from galacticus_sed_calculator.sed_calculator import (
             detect_galacticus_format,
         )
         _, base_path = detect_galacticus_format(self.galacticus_file)
+        with h5py.File(self.galacticus_file, 'r') as f:
+            catalog_has_dust = f'{base_path}/dustAttenuatedNodeData' in f
+        self.assertEqual(results['has_dust'], catalog_has_dust)
 
         with h5py.File(output_file, 'r') as f:
             nd = f[f'{base_path}/nodeData']
