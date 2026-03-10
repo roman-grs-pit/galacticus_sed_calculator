@@ -72,7 +72,7 @@ from galacticus_sed_calculator.sed_calculator import (
 from galacticus_sed_calculator.dust_attenuation import read_dust_model_from_catalog
 
 # Default wavelength grid
-DEFAULT_WAVELENGTH_MIN = 4000    # Angstroms
+DEFAULT_WAVELENGTH_MIN = 3000    # Angstroms
 DEFAULT_WAVELENGTH_MAX = 24000   # Angstroms
 DEFAULT_WAVELENGTH_NPOINTS = 2000
 
@@ -640,7 +640,7 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
         Extra cuts: ``{dataset_name: (min_value, max_value)}``.
     obs_wavelengths : Quantity or None, optional
         Wavelength grid for SED calculation.  Defaults to
-        ``np.linspace(4000, 24000, 2000) * u.AA``.
+        ``np.linspace(3000, 24000, 2000) * u.AA``.
     component : str, optional
         Galaxy component for SED calculation (``'total'``, ``'disk'``, or
         ``'spheroid'``).  Default ``'total'``.
