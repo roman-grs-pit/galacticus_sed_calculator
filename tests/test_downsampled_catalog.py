@@ -872,5 +872,101 @@ class TestCreateDownsampledCatalogIntegration(unittest.TestCase):
         self.assertFalse(os.path.exists(output_file))
 
 
+    def test_flam_units_attributes(self):
+        """When flux_unit='flam', the stored SED attributes must reflect f_lambda units."""
+        from create_downsampled_catalog import calculate_and_save_seds
+        from galacticus_sed_calculator.sed_calculator import (
+            detect_galacticus_format,
+        )
+
+        output_file = os.path.join(self.tmp_dir, 'seds_flam.hdf5')
+        format_type, base_path = detect_galacticus_format(
+            self.galacticus_file
+        )
+        selected = np.array([0])
+
+        copy_galaxy_data(
+            self.galacticus_file, output_file, selected, base_path
+        )
+
+        obs_wav = np.linspace(8000, 14000, 20) * u.AA
+        calculate_and_save_seds(
+            self.galacticus_file, output_file, selected, base_path,
+            sed_template_file=self.sed_template,
+            obs_wavelengths=obs_wav,
+            component='total',
+            include_emission_lines=False,
+            flux_unit='flam',
+        )
+
+        with h5py.File(output_file, 'r') as f:
+            ds = f[f'{base_path}/nodeData/observedSED']
+            units_attr = ds.attrs['units']
+            flux_unit_attr = ds.attrs['flux_unit']
+            if isinstance(units_attr, bytes):
+                units_attr = units_attr.decode('utf-8')
+            if isinstance(flux_unit_attr, bytes):
+                flux_unit_attr = flux_unit_attr.decode('utf-8')
+            self.assertEqual(units_attr, 'erg/(s cm^2 AA)')
+            self.assertEqual(flux_unit_attr, 'flam')
+
+    def test_fnu_units_attributes(self):
+        """Default flux_unit='fnu' stores f_nu units and flux_unit attribute."""
+        from create_downsampled_catalog import calculate_and_save_seds
+        from galacticus_sed_calculator.sed_calculator import (
+            detect_galacticus_format,
+        )
+
+        output_file = os.path.join(self.tmp_dir, 'seds_fnu.hdf5')
+        format_type, base_path = detect_galacticus_format(
+            self.galacticus_file
+        )
+        selected = np.array([0])
+
+        copy_galaxy_data(
+            self.galacticus_file, output_file, selected, base_path
+        )
+
+        obs_wav = np.linspace(8000, 14000, 20) * u.AA
+        calculate_and_save_seds(
+            self.galacticus_file, output_file, selected, base_path,
+            sed_template_file=self.sed_template,
+            obs_wavelengths=obs_wav,
+            component='total',
+            include_emission_lines=False,
+            flux_unit='fnu',
+        )
+
+        with h5py.File(output_file, 'r') as f:
+            ds = f[f'{base_path}/nodeData/observedSED']
+            units_attr = ds.attrs['units']
+            flux_unit_attr = ds.attrs['flux_unit']
+            if isinstance(units_attr, bytes):
+                units_attr = units_attr.decode('utf-8')
+            if isinstance(flux_unit_attr, bytes):
+                flux_unit_attr = flux_unit_attr.decode('utf-8')
+            self.assertEqual(units_attr, 'erg/(s cm^2 Hz)')
+            self.assertEqual(flux_unit_attr, 'fnu')
+
+
+class TestComputeSedArrayFluxUnit(unittest.TestCase):
+    """Unit tests for flux_unit validation in _compute_sed_array."""
+
+    def test_invalid_flux_unit_raises(self):
+        """_compute_sed_array must raise ValueError for an unrecognised flux_unit."""
+        from create_downsampled_catalog import _compute_sed_array
+
+        # We only need the function to raise before it touches the file or calc
+        with self.assertRaises(ValueError):
+            _compute_sed_array(
+                'dummy.hdf5', np.array([0]),
+                np.linspace(8000, 14000, 5) * u.AA,
+                calc=None,
+                component='total',
+                include_emission_lines=True,
+                flux_unit='invalid',
+            )
+
+
 if __name__ == '__main__':
     unittest.main()
