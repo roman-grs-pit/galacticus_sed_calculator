@@ -321,7 +321,8 @@ def copy_galaxy_data(input_file, output_file, selected_indices, base_path):
 def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
                         calc, component, include_emission_lines,
                         dust_model=None, dust_params=None,
-                        dust_law='calzetti', random_uniform_index=None):
+                        dust_law='calzetti', random_uniform_index=None,
+                        flux_unit='fnu'):
     """
     Compute SED flux-density arrays for the selected galaxies.
 
@@ -347,11 +348,27 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
         Attenuation law name.
     random_uniform_index : int or None
         Column index into ``nodeData/randomUniform``.
+    flux_unit : str, optional
+        Flux density unit for the output SED.  ``'fnu'`` (default) gives
+        :math:`f_\\nu` in erg/(s cm² Hz); ``'flam'`` gives :math:`f_\\lambda`
+        in erg/(s cm² Å).
 
     Returns
     -------
     sed_array : ndarray, shape (n_selected, n_wavelengths)
     """
+    flux_unit = flux_unit.lower()
+    if flux_unit == 'fnu':
+        synphot_unit = 'FNU'
+        astropy_unit = u.erg / (u.s * u.cm**2 * u.Hz)
+    elif flux_unit == 'flam':
+        synphot_unit = 'FLAM'
+        astropy_unit = u.erg / (u.s * u.cm**2 * u.AA)
+    else:
+        raise ValueError(
+            f"flux_unit must be 'fnu' or 'flam', got '{flux_unit}'."
+        )
+
     n_selected = len(selected_indices)
     n_wav = len(obs_wavelengths)
     sed_array = np.full((n_selected, n_wav), np.nan)
@@ -386,10 +403,10 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
                     random_uniform_index=random_uniform_index,
                 )
 
-            fnu = spectrum(obs_wavelengths, flux_unit='FNU').to_value(
-                u.erg / (u.s * u.cm**2 * u.Hz)
+            flux = spectrum(obs_wavelengths, flux_unit=synphot_unit).to_value(
+                astropy_unit
             )
-            sed_array[out_idx] = fnu
+            sed_array[out_idx] = flux
 
         except Exception as e:
             print(
@@ -402,7 +419,8 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
 
 def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
                          component, include_emission_lines,
-                         dust_model=None, dust_law=None, dust_params=None):
+                         dust_model=None, dust_law=None, dust_params=None,
+                         flux_unit='fnu'):
     """
     Write wavelength grid and SED array into an HDF5 group.
 
@@ -417,7 +435,7 @@ def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
     wav_AA : ndarray, shape (n_wavelengths,)
         Wavelength grid in Angstroms.
     sed_array : ndarray, shape (n_galaxies, n_wavelengths)
-        Flux-density values in erg/(s cm² Hz).
+        Flux-density values; units depend on *flux_unit*.
     component : str
         Galaxy component used for the SED.
     include_emission_lines : bool
@@ -428,7 +446,28 @@ def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
         Attenuation law name (stored as attribute when not None).
     dust_params : dict or None
         Dust model parameters (stored as JSON attribute when not None).
+    flux_unit : str, optional
+        ``'fnu'`` (default) for :math:`f_\\nu` [erg/(s cm² Hz)];
+        ``'flam'`` for :math:`f_\\lambda` [erg/(s cm² Å)].
     """
+    flux_unit = flux_unit.lower()
+    if flux_unit == 'fnu':
+        units_str = b'erg/(s cm^2 Hz)'
+        description_str = (
+            b'Observed-frame flux-density SED for each galaxy, '
+            b'shape (n_galaxies, n_wavelengths). Units: erg/(s cm^2 Hz).'
+        )
+    elif flux_unit == 'flam':
+        units_str = b'erg/(s cm^2 AA)'
+        description_str = (
+            b'Observed-frame flux-density SED for each galaxy, '
+            b'shape (n_galaxies, n_wavelengths). Units: erg/(s cm^2 AA).'
+        )
+    else:
+        raise ValueError(
+            f"flux_unit must be 'fnu' or 'flam', got '{flux_unit}'."
+        )
+
     n_selected, n_wav = sed_array.shape
     with h5py.File(output_file, 'a') as f:
         grp = f.require_group(group_path)
@@ -445,7 +484,8 @@ def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
             'observedSED', data=sed_array,
             compression='gzip', compression_opts=4,
         )
-        sed_ds.attrs['units'] = b'erg/(s cm^2 Hz)'
+        sed_ds.attrs['units'] = units_str
+        sed_ds.attrs['flux_unit'] = flux_unit.encode('utf-8')
         sed_ds.attrs['component'] = component.encode('utf-8')
         sed_ds.attrs['include_emission_lines'] = b'True' if include_emission_lines else b'False'
         if dust_model is not None:
@@ -454,10 +494,7 @@ def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
             sed_ds.attrs['dust_law'] = dust_law.encode('utf-8')
         if dust_params is not None:
             sed_ds.attrs['dust_params'] = json.dumps(dust_params).encode('utf-8')
-        sed_ds.attrs['description'] = (
-            b'Observed-frame flux-density SED for each galaxy, '
-            b'shape (n_galaxies, n_wavelengths). Units: erg/(s cm^2 Hz).'
-        )
+        sed_ds.attrs['description'] = description_str
 
     print(f"\nSaved SED datasets to {group_path} in {output_file}")
     print(f"  observedSEDWavelengths: shape ({n_wav},)")
@@ -467,7 +504,7 @@ def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
 def calculate_and_save_seds(input_file, output_file, selected_indices, base_path,
                              sed_template_file, obs_wavelengths,
                              component='total', include_emission_lines=True,
-                             cosmology=None):
+                             cosmology=None, flux_unit='fnu'):
     """
     Calculate SEDs for selected galaxies and save them to the output file.
 
@@ -506,11 +543,15 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
         Whether to include emission lines in the SED.  Default ``True``.
     cosmology : astropy.cosmology or None, optional
         Cosmology object.  Uses the UNIT cosmology by default.
+    flux_unit : str, optional
+        Flux density unit for the output SED.  ``'fnu'`` (default) stores
+        :math:`f_\\nu` in erg/(s cm² Hz); ``'flam'`` stores
+        :math:`f_\\lambda` in erg/(s cm² Å).
 
     Returns
     -------
     seds : ndarray, shape (n_selected, n_wavelengths)
-        Dust-free flux-density values in units of erg/(s cm² Hz).
+        Dust-free flux-density values in the requested *flux_unit*.
     wavelengths_AA : ndarray, shape (n_wavelengths,)
         Wavelength grid in Angstroms.
     """
@@ -546,6 +587,7 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
         input_file, selected_indices, obs_wavelengths, calc,
         component, include_emission_lines,
         dust_model=None, dust_params=None,
+        flux_unit=flux_unit,
     )
     print("Done!")
     elapsed = time.time() - start_time
@@ -557,6 +599,7 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
     _write_sed_to_group(
         output_file, f'{base_path}/nodeData', wav_AA, sed_free,
         component, include_emission_lines,
+        flux_unit=flux_unit,
     )
 
     # ------------------------------------------------------------------
@@ -578,6 +621,7 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
             dust_params=dust_config['dust_params'],
             dust_law=dust_config['dust_law'],
             random_uniform_index=dust_config.get('random_uniform_index'),
+            flux_unit=flux_unit,
         )
         print("Done!")
         elapsed = time.time() - start_time
@@ -592,6 +636,7 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
             dust_model=dust_config['dust_model'],
             dust_law=dust_config['dust_law'],
             dust_params=dust_config['dust_params'],
+            flux_unit=flux_unit,
         )
 
     return sed_free, wav_AA
@@ -605,7 +650,8 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
                                obs_wavelengths=None,
                                component='total',
                                include_emission_lines=True,
-                               cosmology=None):
+                               cosmology=None,
+                               flux_unit='fnu'):
     """
     Create a downsampled Galacticus catalog with SEDs.
 
@@ -649,6 +695,10 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
     cosmology : astropy.cosmology or None, optional
         Cosmology to use.  Defaults to
         ``FlatLambdaCDM(H0=67.74, Om0=0.3089)``.
+    flux_unit : str, optional
+        Flux density unit for the stored SED.  ``'fnu'`` (default) stores
+        :math:`f_\\nu` in erg/(s cm² Hz); ``'flam'`` stores
+        :math:`f_\\lambda` in erg/(s cm² Å).
 
     Returns
     -------
@@ -729,6 +779,7 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
         component=component,
         include_emission_lines=include_emission_lines,
         cosmology=cosmology,
+        flux_unit=flux_unit,
     )
 
     return {
@@ -867,6 +918,14 @@ def parse_arguments():
         '--wavelength-npoints', type=int, default=DEFAULT_WAVELENGTH_NPOINTS,
         help='Number of points in the wavelength grid.',
     )
+    sed_group.add_argument(
+        '--flux-unit', default='fnu', choices=['fnu', 'flam'],
+        help=(
+            "Flux density unit for the stored SED.  'fnu' (default) saves "
+            "f_nu in erg/(s cm^2 Hz); 'flam' saves f_lambda in "
+            "erg/(s cm^2 AA)."
+        ),
+    )
 
     return parser.parse_args()
 
@@ -917,6 +976,7 @@ def main():
         obs_wavelengths=obs_wavelengths,
         component=args.component,
         include_emission_lines=not args.no_emission_lines,
+        flux_unit=args.flux_unit,
     )
 
     if results and results['n_selected'] > 0:
