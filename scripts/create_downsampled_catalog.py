@@ -322,7 +322,7 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
                         calc, component, include_emission_lines,
                         dust_model=None, dust_params=None,
                         dust_law='calzetti', random_uniform_index=None,
-                        flux_unit='fnu'):
+                        continuum_dust=None, flux_unit='fnu'):
     """
     Compute SED flux-density arrays for the selected galaxies.
 
@@ -348,6 +348,8 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
         Attenuation law name.
     random_uniform_index : int or None
         Column index into ``nodeData/randomUniform``.
+    continuum_dust : dict, float, or None
+        Continuum dust attenuation model.
     flux_unit : str, optional
         Flux density unit for the output SED.  ``'fnu'`` (default) gives
         :math:`f_\\nu` in erg/(s cm² Hz); ``'flam'`` gives :math:`f_\\lambda`
@@ -389,6 +391,7 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
                     dust_params=dust_params,
                     dust_law=dust_law,
                     random_uniform_index=random_uniform_index,
+                    continuum_dust=continuum_dust,
                 )
             else:
                 spectrum = calc.evaluate_component_spectrum(
@@ -401,6 +404,7 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
                     dust_params=dust_params,
                     dust_law=dust_law,
                     random_uniform_index=random_uniform_index,
+                    continuum_dust=continuum_dust,
                 )
 
             flux = spectrum(obs_wavelengths, flux_unit=synphot_unit).to_value(
@@ -420,7 +424,7 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
 def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
                          component, include_emission_lines,
                          dust_model=None, dust_law=None, dust_params=None,
-                         flux_unit='fnu'):
+                         continuum_dust=None, flux_unit='fnu'):
     """
     Write wavelength grid and SED array into an HDF5 group.
 
@@ -446,6 +450,8 @@ def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
         Attenuation law name (stored as attribute when not None).
     dust_params : dict or None
         Dust model parameters (stored as JSON attribute when not None).
+    continuum_dust : dict or None
+        Continuum dust configuration (stored as JSON attribute when not None).
     flux_unit : str, optional
         ``'fnu'`` (default) for :math:`f_\\nu` [erg/(s cm² Hz)];
         ``'flam'`` for :math:`f_\\lambda` [erg/(s cm² Å)].
@@ -494,6 +500,8 @@ def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
             sed_ds.attrs['dust_law'] = dust_law.encode('utf-8')
         if dust_params is not None:
             sed_ds.attrs['dust_params'] = json.dumps(dust_params).encode('utf-8')
+        if continuum_dust is not None:
+            sed_ds.attrs['continuum_dust'] = json.dumps(continuum_dust).encode('utf-8')
         sed_ds.attrs['description'] = description_str
 
     print(f"\nSaved SED datasets to {group_path} in {output_file}")
@@ -621,6 +629,7 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
             dust_params=dust_config['dust_params'],
             dust_law=dust_config['dust_law'],
             random_uniform_index=dust_config.get('random_uniform_index'),
+            continuum_dust=dust_config.get('continuum_dust'),
             flux_unit=flux_unit,
         )
         print("Done!")
@@ -636,6 +645,7 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
             dust_model=dust_config['dust_model'],
             dust_law=dust_config['dust_law'],
             dust_params=dust_config['dust_params'],
+            continuum_dust=dust_config.get('continuum_dust'),
             flux_unit=flux_unit,
         )
 
