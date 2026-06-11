@@ -42,13 +42,17 @@ dev = [
 scripts = [
     "stpsf",  # Required for calculate_catalog_magnitudes.py
 ]
+diagnostics = [
+    "matplotlib",
+    "pandas",
+]
 
 [project.urls]
 Homepage = "https://github.com/roman-grs-pit/galacticus_sed_calculator"
 Repository = "https://github.com/roman-grs-pit/galacticus_sed_calculator"
 
 [tool.setuptools]
-packages = ["galacticus_sed_calculator"]
+packages = ["galacticus_sed_calculator", "galacticus_sed_calculator.diagnostics"]
 include-package-data = false
 
 # Note: Scripts in the scripts/ directory can be run directly with:
