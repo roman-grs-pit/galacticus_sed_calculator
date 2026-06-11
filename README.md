@@ -169,9 +169,21 @@ spectrum = calc.evaluate_total_spectrum(
 ```
 
 For `scripts/calculate_catalog_magnitudes.py --dust-config`, add the same block
-to the YAML config:
+to the YAML config. Emission-line dust should be described separately with
+`emission_line_dust`; older configs using top-level `dust_model`,
+`dust_params`, and `dust_law` are still supported.
 
 ```yaml
+emission_line_dust:
+  model: gb10_generalised
+  params:
+    delta_0: 0.2772
+    delta_z: -1.5792
+    delta_M: -0.8180
+    delta_Mz: -0.5287
+    attenuation_scatter: 0.25
+  law: calzetti
+  random_uniform_index: 0
 continuum_dust:
   model: fixed_av
   params:

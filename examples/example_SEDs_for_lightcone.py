@@ -1,8 +1,9 @@
 """
-Example demonstrating dust attenuation for emission lines.
+Example demonstrating dust attenuation for galaxy spectra.
 
 This example shows how to apply dust attenuation when generating galaxy spectra
-using the generalized GB10 (Garn & Best 2010) model and Calzetti attenuation law.
+using the generalized GB10 (Garn & Best 2010) emission-line model, optional
+continuum attenuation, and the Calzetti attenuation law.
 
 It also demonstrates how to read the dust model configuration back from a
 Galacticus catalog that was processed with calculate_catalog_magnitudes.py
@@ -48,6 +49,7 @@ except KeyError:
                         'attenuation_scatter': 0.25},
         'dust_law': 'calzetti',
         'random_uniform_index': None,
+        'continuum_dust': None,
     }
 
 print(f"  dust_model : {dust_model_specs['dust_model']}")
@@ -55,6 +57,8 @@ print(f"  dust_law   : {dust_model_specs['dust_law']}")
 print(f"  dust_params: {dust_model_specs['dust_params']}")
 if dust_model_specs['random_uniform_index'] is not None:
     print(f"  random_uniform_index: {dust_model_specs['random_uniform_index']}")
+if dust_model_specs.get('continuum_dust') is not None:
+    print(f"  continuum_dust: {dust_model_specs['continuum_dust']}")
 
 # Select a galaxy to analyze
 galaxy_index = 1
@@ -93,7 +97,7 @@ plt.figure(figsize=(12, 6))
 
 plt.subplot(2, 1, 1)
 plt.plot(wavelengths_for_plot, flux_no_dust, label='No dust', alpha=0.7, linewidth=1)
-plt.plot(wavelengths_for_plot, flux_with_dust, label='With dust (GB10)', alpha=0.7, linewidth=1)
+plt.plot(wavelengths_for_plot, flux_with_dust, label='With dust', alpha=0.7, linewidth=1)
 plt.xlabel('Observed Wavelength (Å)')
 plt.ylabel('Flux (erg/s/cm²/Å)')
 plt.title(f'Galaxy Spectrum Comparison (z={galData["redshift"]:.3f})')
@@ -124,4 +128,5 @@ print("  - delta_z: Redshift dependence")
 print("  - delta_M: Stellar mass dependence")
 print("  - delta_Mz: Mass-redshift coupling")
 print("  - attenuation_scatter: normal scatter in attenuation (mags)")
+print("  - continuum_dust: optional continuum attenuation config")
 print("=" * 70)

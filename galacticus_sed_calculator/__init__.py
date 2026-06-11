@@ -11,6 +11,7 @@ from .dust_attenuation import (
     calzetti_attenuation_law,
     apply_dust_attenuation_to_continuum,
     apply_continuum_dust_model,
+    normalize_emission_line_dust,
     normalize_continuum_dust,
     apply_dust_attenuation_to_line,
     read_dust_model_from_catalog,

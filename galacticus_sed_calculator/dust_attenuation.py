@@ -336,6 +336,73 @@ def normalize_continuum_dust(continuum_dust):
     }
 
 
+def normalize_emission_line_dust(
+    emission_line_dust=None,
+    *,
+    dust_model=None,
+    dust_params=None,
+    dust_law='calzetti',
+    random_uniform_index=None,
+):
+    """
+    Validate and normalize an emission-line dust configuration.
+
+    The preferred form is::
+
+        {
+            "model": "gb10_generalised",
+            "params": {...},
+            "law": "calzetti",
+            "random_uniform_index": 0,
+        }
+
+    Legacy keyword-style inputs (``dust_model``, ``dust_params``,
+    ``dust_law``, and ``random_uniform_index``) are also accepted.
+    """
+    if emission_line_dust is None and dust_model is None:
+        return None
+
+    if emission_line_dust is not None:
+        if not isinstance(emission_line_dust, dict):
+            raise TypeError("emission_line_dust must be None or a dictionary.")
+        model = emission_line_dust.get(
+            'model', emission_line_dust.get('dust_model', dust_model)
+        )
+        params = emission_line_dust.get(
+            'params', emission_line_dust.get('dust_params', dust_params)
+        )
+        law = emission_line_dust.get(
+            'law', emission_line_dust.get('dust_law', dust_law)
+        )
+        random_uniform_index = emission_line_dust.get(
+            'random_uniform_index', random_uniform_index
+        )
+    else:
+        model = dust_model
+        params = dust_params
+        law = dust_law
+
+    if model is None:
+        return None
+    if params is None:
+        raise ValueError(
+            f"Emission-line dust model '{model}' requires dust parameters."
+        )
+    if law is None:
+        law = 'calzetti'
+
+    return {
+        'model': model,
+        'params': dict(params),
+        'law': law,
+        'random_uniform_index': (
+            int(random_uniform_index)
+            if random_uniform_index is not None
+            else None
+        ),
+    }
+
+
 def apply_continuum_dust_model(continuum_flux, wavelength, continuum_dust):
     """
     Apply a normalized continuum dust model to a continuum spectrum.
@@ -468,9 +535,9 @@ def read_dust_model_from_catalog(galacticus_file, base_path=None):
     """
     Read dust model configuration from a Galacticus HDF5 catalog.
 
-    Reads the ``dust_model``, ``dust_params``, ``dust_law``,
-    ``continuum_dust``, and ``random_uniform_index`` attributes that were
-    written to the
+    Reads the preferred ``emission_line_dust`` and ``continuum_dust``
+    attributes, or the legacy ``dust_model``, ``dust_params``, ``dust_law``,
+    and ``random_uniform_index`` attributes, that were written to the
     ``dustAttenuatedNodeData`` group by
     ``calculate_catalog_magnitudes.py --dust-config``.
 
@@ -488,9 +555,11 @@ def read_dust_model_from_catalog(galacticus_file, base_path=None):
     dict
         Dictionary with keys ``'dust_model'``, ``'dust_params'``,
         ``'dust_law'``, ``'continuum_dust'``, and
-        ``'random_uniform_index'``. Optional values are returned as ``None``
-        when their metadata attributes are absent. The keys match the keyword
-        arguments accepted by
+        ``'random_uniform_index'``. The emission-line metadata are returned
+        using these legacy keyword names so the dict can still be unpacked
+        directly into the SED calculator API. Optional values are returned as
+        ``None`` when their metadata attributes are absent. The keys match the
+        keyword arguments accepted by
         :meth:`~galacticus_sed_calculator.SEDCalculator.evaluate_total_spectrum`
         and
         :meth:`~galacticus_sed_calculator.SEDCalculator.calculate_magnitudes`,
@@ -530,28 +599,51 @@ def read_dust_model_from_catalog(galacticus_file, base_path=None):
                 "with --dust-config to generate dust-attenuated quantities first."
             )
         grp = f[dust_group_path]
-        dust_model = grp.attrs['dust_model'] if 'dust_model' in grp.attrs else None
-        dust_law = grp.attrs['dust_law'] if 'dust_law' in grp.attrs else 'calzetti'
-        dust_params = (
-            json.loads(grp.attrs['dust_params'])
-            if 'dust_params' in grp.attrs
-            else None
-        )
+        if 'emission_line_dust' in grp.attrs:
+            emission_line_dust = normalize_emission_line_dust(
+                json.loads(grp.attrs['emission_line_dust'])
+            )
+        else:
+            emission_line_dust = normalize_emission_line_dust(
+                dust_model=grp.attrs['dust_model']
+                if 'dust_model' in grp.attrs
+                else None,
+                dust_law=grp.attrs['dust_law']
+                if 'dust_law' in grp.attrs
+                else 'calzetti',
+                dust_params=json.loads(grp.attrs['dust_params'])
+                if 'dust_params' in grp.attrs
+                else None,
+                random_uniform_index=int(grp.attrs['random_uniform_index'])
+                if 'random_uniform_index' in grp.attrs
+                else None,
+            )
         continuum_dust = (
             normalize_continuum_dust(json.loads(grp.attrs['continuum_dust']))
             if 'continuum_dust' in grp.attrs
             else None
         )
-        random_uniform_index = (
-            int(grp.attrs['random_uniform_index'])
-            if 'random_uniform_index' in grp.attrs
-            else None
-        )
 
     return {
-        'dust_model': dust_model,
-        'dust_params': dust_params,
-        'dust_law': dust_law,
-        'random_uniform_index': random_uniform_index,
+        'dust_model': (
+            emission_line_dust['model']
+            if emission_line_dust is not None
+            else None
+        ),
+        'dust_params': (
+            emission_line_dust['params']
+            if emission_line_dust is not None
+            else None
+        ),
+        'dust_law': (
+            emission_line_dust['law']
+            if emission_line_dust is not None
+            else 'calzetti'
+        ),
+        'random_uniform_index': (
+            emission_line_dust['random_uniform_index']
+            if emission_line_dust is not None
+            else None
+        ),
         'continuum_dust': continuum_dust,
     }
