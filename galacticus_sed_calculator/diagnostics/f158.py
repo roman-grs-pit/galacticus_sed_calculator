@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -28,6 +29,9 @@ from .common import (
 
 MAGNITUDE_DATASET = "apparentMagnitudeRomanWFI:F158"
 ARCMIN2_PER_DEG2 = 3600.0
+PACKAGED_OBSERVATION_NZ = DEFAULT_OBSERVATION_DIR / "cosmos2025_f150w_default_nz.csv"
+PACKAGED_OBSERVATION_APPARENT = DEFAULT_OBSERVATION_DIR / "cosmos2025_f150w_default_apparent_magnitude_distributions.csv"
+PACKAGED_OBSERVATION_METADATA = DEFAULT_OBSERVATION_DIR / "cosmos2025_f150w_default_reference.meta.json"
 
 
 @dataclass(frozen=True)
@@ -68,6 +72,7 @@ class F158DiagnosticsConfig:
     cosmos2020_area_deg2: float = 2.0
     cosmos2020_redshift_column: str | None = None
     cosmos2020_magnitude_column: str | None = None
+    packaged_observation_reference: bool = True
 
 
 def _edges(z_min: float, z_max: float, dz: float) -> np.ndarray:
@@ -421,6 +426,76 @@ def _load_observation_catalogs(config: F158DiagnosticsConfig) -> list[Any]:
     ]
 
 
+def _nz_reference_matches(frame: pd.DataFrame, edges: np.ndarray) -> bool:
+    if frame.shape[0] != edges.size - 1:
+        return False
+    return bool(
+        np.allclose(frame["z_min"].to_numpy(dtype=float), edges[:-1])
+        and np.allclose(frame["z_max"].to_numpy(dtype=float), edges[1:])
+    )
+
+
+def _apparent_reference_matches(frame: pd.DataFrame, cases: list[dict[str, Any]]) -> bool:
+    for case in cases:
+        subset = frame.loc[frame["sample_label"] == case["sample_label"]].sort_values("bin_index")
+        edges = np.asarray(case["edges"], dtype=float)
+        if subset.shape[0] != edges.size - 1:
+            return False
+        if not np.allclose(subset["z_min"].to_numpy(dtype=float), case["z_min"]):
+            return False
+        if not np.allclose(subset["z_max"].to_numpy(dtype=float), case["z_max"]):
+            return False
+        if not np.allclose(subset["apparent_magnitude_min"].to_numpy(dtype=float), edges[:-1]):
+            return False
+        if not np.allclose(subset["apparent_magnitude_max"].to_numpy(dtype=float), edges[1:]):
+            return False
+    return True
+
+
+def _load_packaged_observation_rows(
+    config: F158DiagnosticsConfig,
+    fine_edges: np.ndarray,
+    magnitude_cases: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+    if not config.packaged_observation_reference:
+        return [], [], []
+    if not PACKAGED_OBSERVATION_NZ.exists() or not PACKAGED_OBSERVATION_APPARENT.exists():
+        return [], [], []
+
+    nz_frame = pd.read_csv(PACKAGED_OBSERVATION_NZ)
+    apparent_frame = pd.read_csv(PACKAGED_OBSERVATION_APPARENT)
+    if not np.isclose(config.magnitude_limit, 26.0):
+        print(
+            "Packaged COSMOS-Web reference uses m<26 for n(z); pass --cosmos-web-catalog "
+            "to regenerate observations for a different magnitude limit.",
+            flush=True,
+        )
+        return [], [], []
+    if not _nz_reference_matches(nz_frame, fine_edges) or not _apparent_reference_matches(apparent_frame, magnitude_cases):
+        print(
+            "Packaged COSMOS-Web reference binning does not match this run; pass --cosmos-web-catalog "
+            "to regenerate observations for custom bins.",
+            flush=True,
+        )
+        return [], [], []
+
+    metadata: dict[str, Any] = {
+        "source": "COSMOS-Web/COSMOS2025 F150W",
+        "reference_type": "packaged_binned",
+        "nz_file": str(PACKAGED_OBSERVATION_NZ),
+        "apparent_magnitude_file": str(PACKAGED_OBSERVATION_APPARENT),
+    }
+    if PACKAGED_OBSERVATION_METADATA.exists():
+        with PACKAGED_OBSERVATION_METADATA.open() as handle:
+            metadata.update(json.load(handle))
+    print(
+        "Loaded packaged COSMOS-Web/COSMOS2025 F150W binned reference "
+        f"({PACKAGED_OBSERVATION_NZ.name}, {PACKAGED_OBSERVATION_APPARENT.name})",
+        flush=True,
+    )
+    return nz_frame.to_dict("records"), apparent_frame.to_dict("records"), [metadata]
+
+
 def _accumulate(
     paths: list[Path],
     *,
@@ -758,13 +833,30 @@ def run_f158_diagnostics(
     if config.plot_individual_files and not individual_nz_frame.empty:
         individual_nz_frame.to_csv(data_dir / "f158_nz_individual_files.csv", index=False)
         data_outputs.append("f158_nz_individual_files.csv")
-    catalogs = _load_observation_catalogs(config)
-    obs_nz_rows = _observation_nz_rows(catalogs, fine_edges, config.magnitude_limit) if catalogs else []
-    obs_apparent_rows = (
-        _observation_apparent_magnitude_rows(catalogs, magnitude_cases, magnitude_limit=config.magnitude_limit)
-        if catalogs
-        else []
+    observation_metadata: list[dict[str, Any]] = []
+    raw_observation_requested = any(
+        path is not None
+        for path in [
+            config.three_dhst_catalog,
+            config.cosmos_web_catalog,
+            config.cosmos2020_catalog,
+        ]
     )
+    if raw_observation_requested:
+        catalogs = _load_observation_catalogs(config)
+        obs_nz_rows = _observation_nz_rows(catalogs, fine_edges, config.magnitude_limit) if catalogs else []
+        obs_apparent_rows = (
+            _observation_apparent_magnitude_rows(catalogs, magnitude_cases, magnitude_limit=config.magnitude_limit)
+            if catalogs
+            else []
+        )
+        observation_metadata = [catalog.metadata for catalog in catalogs]
+    else:
+        obs_nz_rows, obs_apparent_rows, observation_metadata = _load_packaged_observation_rows(
+            config,
+            fine_edges,
+            magnitude_cases,
+        )
     if obs_nz_rows:
         write_csv(data_dir / "observed_f158_analog_nz.csv", obs_nz_rows)
         data_outputs.append("observed_f158_analog_nz.csv")
@@ -809,7 +901,7 @@ def run_f158_diagnostics(
         "skipped_files": [(str(path), reason) for path, reason in skipped],
         "total_rows": int(nz_accumulators["fine"]["total_rows"]),
         "selected_rows": int(nz_accumulators["fine"]["selected_rows"]),
-        "observation_catalogs": [catalog.metadata for catalog in catalogs],
+        "observation_catalogs": observation_metadata,
         "outputs": {
             "plots": ["f158_nz.png", "f158_apparent_magnitude_distributions.png"],
             "data": data_outputs,

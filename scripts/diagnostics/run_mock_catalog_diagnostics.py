@@ -85,6 +85,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--cosmos2020-area-deg2", type=float, default=2.0)
     parser.add_argument("--cosmos2020-redshift-column", default=None)
     parser.add_argument("--cosmos2020-magnitude-column", default=None)
+    parser.add_argument(
+        "--no-packaged-observation-reference",
+        action="store_true",
+        help="Do not use the bundled binned COSMOS-Web F150W reference curves.",
+    )
     parser.add_argument("--include-agn", action=argparse.BooleanOptionalAction, default=False)
     parser.add_argument("--halpha-target-hdf5", type=Path, default=None)
     parser.add_argument("--point-redshift-half-width", type=float, default=0.10)
@@ -201,6 +206,7 @@ def main() -> None:
             cosmos2020_area_deg2=args.cosmos2020_area_deg2,
             cosmos2020_redshift_column=args.cosmos2020_redshift_column,
             cosmos2020_magnitude_column=args.cosmos2020_magnitude_column,
+            packaged_observation_reference=not args.no_packaged_observation_reference,
         )
         results["f158"] = run_f158_diagnostics(
             paths,

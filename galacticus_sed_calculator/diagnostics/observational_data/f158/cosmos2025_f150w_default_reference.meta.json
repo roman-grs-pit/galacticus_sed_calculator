@@ -1,0 +1,24 @@
+{
+  "source": "COSMOS-Web/COSMOS2025 F150W",
+  "area_deg2": 0.54,
+  "input_catalog": "COSMOSWeb_mastercatalog_v1.1.fits",
+  "processed_catalog": "cosmos2025_f150w_catalog.csv",
+  "redshift_column": "zfinal",
+  "magnitude_column": "mag_model_f150w",
+  "selection": "type == 0, finite magnitude/redshift, flag_star == 0, warn_flag == 0",
+  "magnitude_limit": 26.0,
+  "nz": {
+    "file": "cosmos2025_f150w_default_nz.csv",
+    "z_min": 0.0,
+    "z_max": 8.0,
+    "dz": 0.05
+  },
+  "apparent_magnitude_distributions": {
+    "file": "cosmos2025_f150w_default_apparent_magnitude_distributions.csv",
+    "z_centers": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+    "z_half_width": 0.25,
+    "magnitude_min": 16.0,
+    "magnitude_max": 30.0,
+    "magnitude_bin_width": 0.25
+  }
+}

@@ -55,6 +55,9 @@ Repository = "https://github.com/roman-grs-pit/galacticus_sed_calculator"
 packages = ["galacticus_sed_calculator", "galacticus_sed_calculator.diagnostics"]
 include-package-data = false
 
+[tool.setuptools.package-data]
+"galacticus_sed_calculator.diagnostics" = ["observational_data/f158/*.csv", "observational_data/f158/*.json"]
+
 # Note: Scripts in the scripts/ directory can be run directly with:
 #   python scripts/calculate_catalog_coordinates.py
 #   python scripts/calculate_catalog_magnitudes.py

@@ -80,8 +80,7 @@ The standard Roman mock-catalog QA plots can be generated with:
 python scripts/diagnostics/run_mock_catalog_diagnostics.py \
   --input-glob '../galaxyCatalogs/romanUNIT-d*_16sqDeg.hdf5' \
   --output-dir diagnostics \
-  --skip-bad-files \
-  --cosmos-web-catalog observational_data/f158/cosmos2025_f150w_catalog.csv
+  --skip-bad-files
 ```
 
 This writes the headline figures directly to `diagnostics/`:
@@ -97,6 +96,10 @@ CSV products go in `diagnostics/data/`, and command/config/catalog provenance
 goes in `diagnostics/metadata/`. The F158 diagnostics use dust-attenuated
 `apparentMagnitudeRomanWFI:F158` by default, while the emission-line LFs use the
 dust-attenuated emission-line luminosities.
+
+By default, the F158 plots include a bundled binned COSMOS-Web/COSMOS2025 F150W
+reference. To regenerate that comparison from a full object catalog, pass
+`--cosmos-web-catalog /path/to/cosmos2025_f150w_catalog.csv`.
 
 ### Basic Example
 
