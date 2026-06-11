@@ -1089,6 +1089,116 @@ class SEDCalculator:
             else:
                 total_spectrum += spectrum
         return total_spectrum
+
+    def _magnitude_failure_message(self, filename, galIndex, filter_name,
+                                   bandpass, obs_wavelengths, error):
+        """
+        Build an informative warning for filter-level magnitude failures.
+
+        Synphot raises a terse ``Integrated flux is <= 0`` error when the
+        spectrum contributes no positive flux through a filter. For Galacticus
+        mock catalogs this is often expected for zero-stellar-mass galaxies or
+        filters probing below the SED template rest-frame wavelength coverage.
+        """
+        message = (
+            f"Failed to calculate {filter_name} magnitude for galaxy "
+            f"{galIndex}: {error}; setting magnitude to NaN"
+        )
+        if "Integrated flux is <= 0" not in str(error):
+            return message
+
+        notes = []
+        redshift = None
+        try:
+            if filename not in self._file_formats:
+                format_type, base_path = detect_galacticus_format(filename)
+                self._file_formats[filename] = (format_type, base_path)
+            else:
+                format_type, base_path = self._file_formats[filename]
+
+            node_data_path = f'{base_path}/nodeData'
+            with h5py.File(filename, 'r') as f:
+                if format_type == 'lightcone':
+                    redshift_path = (
+                        f'{node_data_path}/lightconeRedshiftObserved'
+                    )
+                    if redshift_path in f:
+                        redshift = float(f[redshift_path][galIndex])
+                else:
+                    output_time = f[base_path].attrs['outputTime']
+                    redshift = float(outputTime_to_redshift(
+                        output_time, self.cosmo
+                    ))
+
+                stellar_masses = []
+                for mass_name in ('diskMassStellar', 'spheroidMassStellar'):
+                    mass_path = f'{node_data_path}/{mass_name}'
+                    if mass_path in f:
+                        stellar_masses.append(float(f[mass_path][galIndex]))
+                if stellar_masses and np.sum(stellar_masses) <= 0.0:
+                    notes.append(
+                        "galaxy has zero disk+spheroid stellar mass"
+                    )
+        except Exception:
+            pass
+
+        try:
+            bandpass_waves = getattr(bandpass, 'waveset', None)
+            if bandpass_waves is not None:
+                bandpass_waves = process_wavelength_array(
+                    bandpass_waves
+                ).to_value(u.AA)
+                bandpass_waves = bandpass_waves[
+                    np.isfinite(bandpass_waves)
+                ]
+            if bandpass_waves is not None and len(bandpass_waves) > 0:
+                filter_min = float(np.min(bandpass_waves))
+                filter_max = float(np.max(bandpass_waves))
+
+                obs_grid = process_wavelength_array(
+                    obs_wavelengths
+                ).to_value(u.AA)
+                obs_min = float(np.nanmin(obs_grid))
+                obs_max = float(np.nanmax(obs_grid))
+                if filter_max < obs_min or filter_min > obs_max:
+                    notes.append(
+                        f"{filter_name} lies outside the supplied observed "
+                        f"wavelength grid ({obs_min:.0f}-{obs_max:.0f} "
+                        "Angstrom)"
+                    )
+                elif filter_min < obs_min or filter_max > obs_max:
+                    notes.append(
+                        f"{filter_name} is only partly covered by the "
+                        f"supplied observed wavelength grid "
+                        f"({obs_min:.0f}-{obs_max:.0f} Angstrom)"
+                    )
+
+                if redshift is not None:
+                    rest_min = filter_min / (1.0 + redshift)
+                    rest_max = filter_max / (1.0 + redshift)
+                    template_min = float(np.nanmin(self.sedWavelength))
+                    template_max = float(np.nanmax(self.sedWavelength))
+                    if rest_max < template_min or rest_min > template_max:
+                        notes.append(
+                            f"at z={redshift:.2f}, {filter_name} samples "
+                            f"rest-frame {rest_min:.0f}-{rest_max:.0f} "
+                            f"Angstrom, outside the SED template range "
+                            f"({template_min:.0f}-{template_max:.0f} "
+                            "Angstrom)"
+                        )
+                    elif rest_min < template_min or rest_max > template_max:
+                        notes.append(
+                            f"at z={redshift:.2f}, {filter_name} partly "
+                            "samples rest-frame wavelengths outside the "
+                            f"SED template range ({template_min:.0f}-"
+                            f"{template_max:.0f} Angstrom)"
+                        )
+        except Exception:
+            pass
+
+        if notes:
+            message += f" (likely expected: {'; '.join(notes)})"
+        return message
     
     def calculate_magnitudes(self, filename, galIndex, bandpasses, component='total', 
                             magnitude_system='AB', obs_wavelengths=np.linspace(3000, 30000, 1000)*u.AA,
@@ -1239,7 +1349,10 @@ class SEDCalculator:
                 
             except Exception as e:
                 # If magnitude calculation fails for a filter, store NaN
-                print(f"Warning: Failed to calculate {filter_name} magnitude for galaxy {galIndex}: {e}")
+                print("Warning: " + self._magnitude_failure_message(
+                    filename, galIndex, filter_name, bandpass,
+                    obs_wavelengths, e
+                ))
                 magnitudes[filter_name] = np.nan
         
         return magnitudes
