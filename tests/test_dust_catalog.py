@@ -25,6 +25,7 @@ from galacticus_sed_calculator.dust_attenuation import read_dust_model_from_cata
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'scripts'))
 from calculate_catalog_magnitudes import (
     load_dust_config,
+    load_continuum_dust_config,
     calculate_dust_attenuated_emission_lines,
     save_dust_model_metadata,
     save_magnitudes_to_galacticus_file,
@@ -43,6 +44,17 @@ DUST_PARAMS = {
 }
 DUST_MODEL = 'gb10_generalised'
 DUST_LAW = 'calzetti'
+CONTINUUM_DUST = {
+    'model': 'fixed_av',
+    'params': {'A_V': 1.0},
+    'law': 'calzetti',
+}
+EMISSION_LINE_DUST = {
+    'model': DUST_MODEL,
+    'params': DUST_PARAMS,
+    'law': DUST_LAW,
+    'random_uniform_index': 2,
+}
 
 
 def _make_minimal_lightcone_hdf5(path, n_gals=5):
@@ -91,6 +103,32 @@ class TestLoadDustConfig(unittest.TestCase):
         self.assertAlmostEqual(dust_params['delta_z'], -1.614)
         self.assertIsNone(random_uniform_index)
 
+    def test_preferred_emission_line_dust_config_returns_correct_values(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = os.path.join(tmp, 'dust.yaml')
+            self._write_config(cfg_path, {
+                'emission_line_dust': EMISSION_LINE_DUST,
+            })
+            dust_model, dust_params, dust_law, random_uniform_index = load_dust_config(cfg_path)
+
+        self.assertEqual(dust_model, DUST_MODEL)
+        self.assertEqual(dust_law, DUST_LAW)
+        self.assertEqual(dust_params['delta_0'], 0.275)
+        self.assertEqual(random_uniform_index, 2)
+
+    def test_mixed_preferred_and_legacy_config_raises(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = os.path.join(tmp, 'dust.yaml')
+            self._write_config(cfg_path, {
+                'emission_line_dust': EMISSION_LINE_DUST,
+                'dust_model': DUST_MODEL,
+                'dust_params': DUST_PARAMS,
+                'dust_law': DUST_LAW,
+            })
+            with self.assertRaises(ValueError) as ctx:
+                load_dust_config(cfg_path)
+        self.assertIn('mixes preferred emission_line_dust', str(ctx.exception))
+
     def test_missing_key_raises_value_error(self):
         with tempfile.TemporaryDirectory() as tmp:
             cfg_path = os.path.join(tmp, 'dust.yaml')
@@ -119,6 +157,22 @@ class TestLoadDustConfig(unittest.TestCase):
             })
             _, _, _, random_uniform_index = load_dust_config(cfg_path)
         self.assertEqual(random_uniform_index, 2)
+
+    def test_continuum_only_config_is_valid(self):
+        """A config can request continuum dust without emission-line dust."""
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg_path = os.path.join(tmp, 'dust.yaml')
+            self._write_config(cfg_path, {
+                'continuum_dust': CONTINUUM_DUST,
+            })
+            dust_model, dust_params, dust_law, random_uniform_index = load_dust_config(cfg_path)
+            continuum_dust = load_continuum_dust_config(cfg_path)
+
+        self.assertIsNone(dust_model)
+        self.assertIsNone(dust_params)
+        self.assertEqual(dust_law, DUST_LAW)
+        self.assertIsNone(random_uniform_index)
+        self.assertEqual(continuum_dust, CONTINUUM_DUST)
 
 # ---------------------------------------------------------------------------
 # Test: calculate_dust_attenuated_emission_lines
@@ -242,6 +296,23 @@ class TestSaveDustModelMetadata(unittest.TestCase):
         self.assertAlmostEqual(stored['delta_0'], 0.275)
         self.assertAlmostEqual(stored['delta_z'], -1.614)
 
+    def test_emission_line_dust_stored_as_json_string(self):
+        """Preferred emission_line_dust metadata should be stored as JSON."""
+        with h5py.File(self.hdf5_path, 'a') as f:
+            grp = f['TestGroup']
+            save_dust_model_metadata(
+                grp,
+                DUST_MODEL,
+                DUST_PARAMS,
+                DUST_LAW,
+                random_uniform_index=2,
+            )
+            stored = json.loads(grp.attrs['emission_line_dust'])
+        self.assertEqual(stored['model'], DUST_MODEL)
+        self.assertEqual(stored['law'], DUST_LAW)
+        self.assertAlmostEqual(stored['params']['delta_0'], 0.275)
+        self.assertEqual(stored['random_uniform_index'], 2)
+
     def test_overwrite_replaces_attributes(self):
         new_params = dict(DUST_PARAMS)
         new_params['delta_0'] = 999.0
@@ -251,6 +322,20 @@ class TestSaveDustModelMetadata(unittest.TestCase):
             save_dust_model_metadata(grp, DUST_MODEL, new_params, DUST_LAW)
             stored = json.loads(grp.attrs['dust_params'])
         self.assertAlmostEqual(stored['delta_0'], 999.0)
+
+    def test_continuum_dust_metadata_stored_as_json(self):
+        with h5py.File(self.hdf5_path, 'a') as f:
+            grp = f['TestGroup']
+            save_dust_model_metadata(
+                grp,
+                DUST_MODEL,
+                DUST_PARAMS,
+                DUST_LAW,
+                continuum_dust=CONTINUUM_DUST,
+            )
+            stored = json.loads(grp.attrs['continuum_dust'])
+        self.assertEqual(stored['model'], 'fixed_av')
+        self.assertAlmostEqual(stored['params']['A_V'], 1.0)
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +371,7 @@ class TestSaveMagnitudesWithDust(unittest.TestCase):
             results['dust_model'] = DUST_MODEL
             results['dust_params'] = DUST_PARAMS
             results['dust_law'] = DUST_LAW
+            results['continuum_dust'] = CONTINUUM_DUST
             # Dust emission line datasets use the SAME names as the dust-free
             # versions (they will be stored in dustAttenuatedNodeData group)
             results['dust_emission_lines'] = {
@@ -348,6 +434,11 @@ class TestSaveMagnitudesWithDust(unittest.TestCase):
             self.assertEqual(grp.attrs['dust_model'], DUST_MODEL)
             stored = json.loads(grp.attrs['dust_params'])
             self.assertAlmostEqual(stored['delta_0'], 0.275)
+            emission_line = json.loads(grp.attrs['emission_line_dust'])
+            self.assertEqual(emission_line['model'], DUST_MODEL)
+            self.assertAlmostEqual(emission_line['params']['delta_0'], 0.275)
+            continuum = json.loads(grp.attrs['continuum_dust'])
+            self.assertAlmostEqual(continuum['params']['A_V'], 1.0)
 
     def test_no_dust_group_when_dust_not_requested(self):
         results = self._make_results(with_dust=False)
@@ -377,13 +468,19 @@ class TestReadDustModelFromCatalog(unittest.TestCase):
         import shutil
         shutil.rmtree(self.tmp_dir, ignore_errors=True)
 
-    def _write_dust_group(self, dust_params=None):
+    def _write_dust_group(self, dust_params=None, continuum_dust=None):
         """Helper: write a dustAttenuatedNodeData group with metadata."""
         if dust_params is None:
             dust_params = DUST_PARAMS
         with h5py.File(self.hdf5_path, 'a') as f:
             grp = f.require_group('Lightcone/Output1/dustAttenuatedNodeData')
-            save_dust_model_metadata(grp, DUST_MODEL, dust_params, DUST_LAW)
+            save_dust_model_metadata(
+                grp,
+                DUST_MODEL,
+                dust_params,
+                DUST_LAW,
+                continuum_dust=continuum_dust,
+            )
 
     def test_returns_correct_values(self):
         self._write_dust_group()
@@ -395,6 +492,7 @@ class TestReadDustModelFromCatalog(unittest.TestCase):
         self.assertAlmostEqual(result['dust_params']['delta_0'], 0.275)
         self.assertAlmostEqual(result['dust_params']['delta_z'], -1.614)
         self.assertIsNone(result['random_uniform_index'])
+        self.assertIsNone(result['continuum_dust'])
 
     def test_returns_dict(self):
         """read_dust_model_from_catalog should return a dict."""
@@ -407,6 +505,7 @@ class TestReadDustModelFromCatalog(unittest.TestCase):
         self.assertIn('dust_params', result)
         self.assertIn('dust_law', result)
         self.assertIn('random_uniform_index', result)
+        self.assertIn('continuum_dust', result)
 
     def test_dust_params_is_dict(self):
         """dust_params should be returned as a dict, not a raw JSON string."""
@@ -443,6 +542,61 @@ class TestReadDustModelFromCatalog(unittest.TestCase):
         )
         self.assertEqual(result['random_uniform_index'], 3)
         self.assertIsInstance(result['random_uniform_index'], int)
+
+    def test_reads_preferred_emission_line_dust_metadata(self):
+        """Preferred emission_line_dust metadata should be read correctly."""
+        with h5py.File(self.hdf5_path, 'a') as f:
+            grp = f.require_group('Lightcone/Output1/dustAttenuatedNodeData')
+            grp.attrs['emission_line_dust'] = json.dumps(EMISSION_LINE_DUST)
+        result = read_dust_model_from_catalog(
+            self.hdf5_path, base_path='/Lightcone/Output1'
+        )
+        self.assertEqual(result['dust_model'], DUST_MODEL)
+        self.assertEqual(result['dust_law'], DUST_LAW)
+        self.assertAlmostEqual(result['dust_params']['delta_0'], 0.275)
+        self.assertEqual(result['random_uniform_index'], 2)
+
+    def test_reads_legacy_dust_metadata(self):
+        """Legacy dust_model/dust_params metadata should still be supported."""
+        with h5py.File(self.hdf5_path, 'a') as f:
+            grp = f.require_group('Lightcone/Output1/dustAttenuatedNodeData')
+            grp.attrs['dust_model'] = DUST_MODEL
+            grp.attrs['dust_law'] = DUST_LAW
+            grp.attrs['dust_params'] = json.dumps(DUST_PARAMS)
+            grp.attrs['random_uniform_index'] = 4
+        result = read_dust_model_from_catalog(
+            self.hdf5_path, base_path='/Lightcone/Output1'
+        )
+        self.assertEqual(result['dust_model'], DUST_MODEL)
+        self.assertEqual(result['dust_law'], DUST_LAW)
+        self.assertAlmostEqual(result['dust_params']['delta_0'], 0.275)
+        self.assertEqual(result['random_uniform_index'], 4)
+
+    def test_continuum_dust_round_trip(self):
+        """continuum_dust metadata should be read back as a dict."""
+        self._write_dust_group(continuum_dust=CONTINUUM_DUST)
+        result = read_dust_model_from_catalog(
+            self.hdf5_path, base_path='/Lightcone/Output1'
+        )
+        self.assertEqual(result['continuum_dust'], CONTINUUM_DUST)
+
+    def test_continuum_only_metadata_round_trip(self):
+        """Dust metadata can describe continuum-only attenuation."""
+        with h5py.File(self.hdf5_path, 'a') as f:
+            grp = f.require_group('Lightcone/Output1/dustAttenuatedNodeData')
+            save_dust_model_metadata(
+                grp,
+                None,
+                None,
+                DUST_LAW,
+                continuum_dust=CONTINUUM_DUST,
+            )
+        result = read_dust_model_from_catalog(
+            self.hdf5_path, base_path='/Lightcone/Output1'
+        )
+        self.assertIsNone(result['dust_model'])
+        self.assertIsNone(result['dust_params'])
+        self.assertEqual(result['continuum_dust'], CONTINUUM_DUST)
 
 
 if __name__ == '__main__':

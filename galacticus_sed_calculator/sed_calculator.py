@@ -9,7 +9,8 @@ from synphot.models import Empirical1D, GaussianFlux1D
 from synphot import units, SourceSpectrum
 from .dust_attenuation import (
     dust_attenuation_gb10_generalised,
-    apply_dust_attenuation_to_line
+    apply_dust_attenuation_to_line,
+    apply_continuum_dust_model,
 )
 #from specutils import Spectrum
 #from specutils.manipulation import FluxConservingResampler
@@ -684,11 +685,16 @@ class SEDCalculator:
         observed_sed = resample_sed(redshifted_wavelength, redshifted_sed, wavelengths, extrapolateWithZeros=extrapolateWithZeros)
         return observed_sed
     
-    def calculate_continuum_Fnu(self, starFormationHistory, redshift, wavelengths=None, extrapolateWithZeros=False):
+    def calculate_continuum_Fnu(self, starFormationHistory, redshift,
+                                wavelengths=None, extrapolateWithZeros=False,
+                                continuum_dust=None):
         # Calculate the flux density from the SED given the star formation history and redshift
         # first, get rest-frame SED from SFH
         rest_frame_sed = self.calculate_rest_frame_sed(starFormationHistory)
         rest_frame_wavelength = self.sedWavelength
+        rest_frame_sed = apply_continuum_dust_model(
+            rest_frame_sed, rest_frame_wavelength, continuum_dust
+        )
         # convert the SED to an observed flux (including redshifting)
         redshifted_wavelength, flux_density = flux_density_from_sed(rest_frame_wavelength, rest_frame_sed, redshift, cosmo=self.cosmo)
         if wavelengths is None:
@@ -803,7 +809,7 @@ class SEDCalculator:
         )
         return observed_sed
 
-    def evaluate_component_spectrum(self, filename, galIndex, component='disk', obs_wavelengths=None, include_emission_lines=True, lineFWHM=10*u.AA, minimumLineFlux=0, minimumLineWavelength=None, maximumLineWavelength=None, use_synphot=True, dust_model=None, dust_params=None, dust_law='calzetti', random_uniform_index=None):
+    def evaluate_component_spectrum(self, filename, galIndex, component='disk', obs_wavelengths=None, include_emission_lines=True, lineFWHM=10*u.AA, minimumLineFlux=0, minimumLineWavelength=None, maximumLineWavelength=None, use_synphot=True, dust_model=None, dust_params=None, dust_law='calzetti', random_uniform_index=None, continuum_dust=None):
         """
         Evaluate the spectrum of a specified galaxy component.
 
@@ -874,6 +880,11 @@ class SEDCalculator:
             will be used for dust attenuation scatter. If None, scatter is generated
             using numpy's random number generator. Default is None.
             Example: random_uniform_index=2 uses the 3rd random number for each galaxy.
+        continuum_dust : dict, float, or None, optional
+            Continuum dust attenuation model. ``None`` applies no continuum
+            attenuation. A scalar is interpreted as a fixed ``A_V`` using the
+            Calzetti law. A dictionary can specify the model explicitly, e.g.
+            ``{'model': 'fixed_av', 'params': {'A_V': 1.0}, 'law': 'calzetti'}``.
 
         Returns
         -------
@@ -927,7 +938,13 @@ class SEDCalculator:
                     continuum_wav = process_wavelength_array(obs_wavelengths)
                     continuum_Fnu = np.zeros(len(continuum_wav)) * u.erg / (u.s * u.Hz * u.cm**2)
             else:
-                Fnu, wav = self.calculate_continuum_Fnu(SFH, redshift, obs_wavelengths, extrapolateWithZeros=True)
+                Fnu, wav = self.calculate_continuum_Fnu(
+                    SFH,
+                    redshift,
+                    obs_wavelengths,
+                    extrapolateWithZeros=True,
+                    continuum_dust=continuum_dust,
+                )
                 if use_synphot:
                     continuum_flux = SourceSpectrum(Empirical1D, points=wav, lookup_table=Fnu)
                 else:
@@ -1061,12 +1078,12 @@ class SEDCalculator:
         component_spectrum = total_flux
         return component_spectrum
     
-    def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA, include_emission_lines=True, minimumLineFlux=0, minimumLineWavelength=None, maximumLineWavelength=None, use_synphot=True, dust_model=None, dust_params=None, dust_law='calzetti', random_uniform_index=None):
+    def evaluate_total_spectrum(self, filename, galIndex, includeAGN=True, obs_wavelengths=np.linspace(8000, 30000, 1000)*u.AA, lineFWHM=10*u.AA, include_emission_lines=True, minimumLineFlux=0, minimumLineWavelength=None, maximumLineWavelength=None, use_synphot=True, dust_model=None, dust_params=None, dust_law='calzetti', random_uniform_index=None, continuum_dust=None):
         components=['disk','spheroid']
         if includeAGN:
             components.append('AGN')    
         for i,component in enumerate(components):
-            spectrum = self.evaluate_component_spectrum(filename, galIndex, component=component, obs_wavelengths=obs_wavelengths, lineFWHM=lineFWHM, include_emission_lines=include_emission_lines, minimumLineFlux=minimumLineFlux, minimumLineWavelength=minimumLineWavelength, maximumLineWavelength=maximumLineWavelength, use_synphot=use_synphot, dust_model=dust_model, dust_params=dust_params, dust_law=dust_law, random_uniform_index=random_uniform_index)
+            spectrum = self.evaluate_component_spectrum(filename, galIndex, component=component, obs_wavelengths=obs_wavelengths, lineFWHM=lineFWHM, include_emission_lines=include_emission_lines, minimumLineFlux=minimumLineFlux, minimumLineWavelength=minimumLineWavelength, maximumLineWavelength=maximumLineWavelength, use_synphot=use_synphot, dust_model=dust_model, dust_params=dust_params, dust_law=dust_law, random_uniform_index=random_uniform_index, continuum_dust=continuum_dust)
             if i==0:
                 total_spectrum = spectrum
             else:
@@ -1076,7 +1093,8 @@ class SEDCalculator:
     def calculate_magnitudes(self, filename, galIndex, bandpasses, component='total', 
                             magnitude_system='AB', obs_wavelengths=np.linspace(3000, 30000, 1000)*u.AA,
                             includeAGN=True, lineFWHM=10*u.AA, dust_model=None, dust_params=None,
-                            dust_law='calzetti', random_uniform_index=None):
+                            dust_law='calzetti', random_uniform_index=None,
+                            continuum_dust=None):
         """
         Calculate observed magnitudes for a galaxy in multiple bandpasses.
         
@@ -1136,6 +1154,11 @@ class SEDCalculator:
             If provided, the random number at randomUniform[galIndex, random_uniform_index]
             will be used for dust attenuation scatter. If None, scatter is generated
             using numpy's random number generator. Default is None.
+        continuum_dust : dict, float, or None, optional
+            Continuum dust attenuation model. ``None`` applies no continuum
+            attenuation. A scalar is interpreted as a fixed ``A_V`` using the
+            Calzetti law. A dictionary can specify the model explicitly, e.g.
+            ``{'model': 'fixed_av', 'params': {'A_V': 1.0}, 'law': 'calzetti'}``.
         
         Returns
         -------
@@ -1178,7 +1201,8 @@ class SEDCalculator:
                                                     dust_model=dust_model,
                                                     dust_params=dust_params,
                                                     dust_law=dust_law,
-                                                    random_uniform_index=random_uniform_index)
+                                                    random_uniform_index=random_uniform_index,
+                                                    continuum_dust=continuum_dust)
         elif component in ['disk', 'spheroid', 'AGN']:
             spectrum = self.evaluate_component_spectrum(filename, galIndex,
                                                         component=component,
@@ -1187,7 +1211,8 @@ class SEDCalculator:
                                                         dust_model=dust_model,
                                                         dust_params=dust_params,
                                                         dust_law=dust_law,
-                                                        random_uniform_index=random_uniform_index)
+                                                        random_uniform_index=random_uniform_index,
+                                                        continuum_dust=continuum_dust)
         else:
             raise ValueError(f"Invalid component '{component}'. Must be 'disk', 'spheroid', 'AGN', or 'total'.")
         

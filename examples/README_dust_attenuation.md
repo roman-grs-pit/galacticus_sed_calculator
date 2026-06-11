@@ -1,14 +1,16 @@
 # Dust Attenuation Example
 
-This example demonstrates how to apply dust attenuation to emission lines in galaxy spectra using the `galacticus_sed_calculator` package.
+This example demonstrates how to apply dust attenuation to galaxy spectra using the `galacticus_sed_calculator` package.
 
 ## Overview
 
-The dust attenuation feature allows you to model the effects of dust on emission line fluxes based on galaxy properties such as stellar mass and redshift. This implementation includes:
+The dust attenuation feature allows you to model the effects of dust on emission line fluxes based on galaxy properties such as stellar mass and redshift, and to apply simple continuum attenuation. This implementation includes:
 
 1. **GB10 Generalized Model**: A parametric model based on Garn & Best (2010) that calculates dust attenuation at H-alpha wavelength as a function of galaxy stellar mass and redshift.
 
 2. **Calzetti Attenuation Law**: Describes how dust attenuation varies with wavelength for starburst galaxies.
+
+3. **Fixed-A_V Continuum Model**: Applies a single Calzetti-law `A_V` to the continuum of every galaxy, e.g. `A_V=1.0`.
 
 ## Usage
 
@@ -44,6 +46,7 @@ You can customize the dust model by:
 - Adjusting the `delta_*` parameters to match your calibration
 - Adding scatter with `attenuation_scatter`
 - Using different galaxy indices to see the effect on different galaxies
+- Passing `continuum_dust={'model': 'fixed_av', 'params': {'A_V': 1.0}, 'law': 'calzetti'}` to attenuate the continuum
 
 ## References
 

@@ -1,0 +1,24 @@
+# These dust model parameters were calibrated so that the Galacticus "paper calibration"
+# (from https://arxiv.org/abs/2509.00143) was a reasonable match to the observed
+# H-alpha luminosity function from Sobral+13 at z=0.4 to 2.2
+# (https://arxiv.org/abs/1202.3436). This calibration procedure is described
+# further here:
+# https://github.com/roman-grs-pit/galacticus_sed_calculator/discussions/23
+#
+# In addition to the emission-line dust model, this configuration applies a
+# simple Calzetti-law continuum attenuation with A_V=1.0 to every galaxy.
+emission_line_dust:
+    model: gb10_generalised
+    params:
+        delta_0: 0.2772
+        delta_z: -1.5792
+        delta_M: -0.8180
+        delta_Mz: -0.5287
+        attenuation_scatter: 0.25
+    law: calzetti
+    random_uniform_index: 0
+continuum_dust:
+    model: fixed_av
+    params:
+        A_V: 1.0
+    law: calzetti

@@ -69,7 +69,11 @@ from galacticus_sed_calculator.sed_calculator import (
     detect_galacticus_format,
     outputTime_to_redshift,
 )
-from galacticus_sed_calculator.dust_attenuation import read_dust_model_from_catalog
+from galacticus_sed_calculator.dust_attenuation import (
+    normalize_continuum_dust,
+    normalize_emission_line_dust,
+    read_dust_model_from_catalog,
+)
 
 # Default wavelength grid
 DEFAULT_WAVELENGTH_MIN = 3000    # Angstroms
@@ -322,7 +326,7 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
                         calc, component, include_emission_lines,
                         dust_model=None, dust_params=None,
                         dust_law='calzetti', random_uniform_index=None,
-                        flux_unit='fnu'):
+                        continuum_dust=None, flux_unit='fnu'):
     """
     Compute SED flux-density arrays for the selected galaxies.
 
@@ -348,6 +352,8 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
         Attenuation law name.
     random_uniform_index : int or None
         Column index into ``nodeData/randomUniform``.
+    continuum_dust : dict, float, or None
+        Continuum dust attenuation model.
     flux_unit : str, optional
         Flux density unit for the output SED.  ``'fnu'`` (default) gives
         :math:`f_\\nu` in erg/(s cm² Hz); ``'flam'`` gives :math:`f_\\lambda`
@@ -389,6 +395,7 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
                     dust_params=dust_params,
                     dust_law=dust_law,
                     random_uniform_index=random_uniform_index,
+                    continuum_dust=continuum_dust,
                 )
             else:
                 spectrum = calc.evaluate_component_spectrum(
@@ -401,6 +408,7 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
                     dust_params=dust_params,
                     dust_law=dust_law,
                     random_uniform_index=random_uniform_index,
+                    continuum_dust=continuum_dust,
                 )
 
             flux = spectrum(obs_wavelengths, flux_unit=synphot_unit).to_value(
@@ -420,6 +428,7 @@ def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
 def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
                          component, include_emission_lines,
                          dust_model=None, dust_law=None, dust_params=None,
+                         random_uniform_index=None, continuum_dust=None,
                          flux_unit='fnu'):
     """
     Write wavelength grid and SED array into an HDF5 group.
@@ -446,6 +455,11 @@ def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
         Attenuation law name (stored as attribute when not None).
     dust_params : dict or None
         Dust model parameters (stored as JSON attribute when not None).
+    random_uniform_index : int or None
+        Column index into ``nodeData/randomUniform`` used for reproducible
+        emission-line dust scatter.
+    continuum_dust : dict or None
+        Continuum dust configuration (stored as JSON attribute when not None).
     flux_unit : str, optional
         ``'fnu'`` (default) for :math:`f_\\nu` [erg/(s cm² Hz)];
         ``'flam'`` for :math:`f_\\lambda` [erg/(s cm² Å)].
@@ -488,12 +502,28 @@ def _write_sed_to_group(output_file, group_path, wav_AA, sed_array,
         sed_ds.attrs['flux_unit'] = flux_unit.encode('utf-8')
         sed_ds.attrs['component'] = component.encode('utf-8')
         sed_ds.attrs['include_emission_lines'] = b'True' if include_emission_lines else b'False'
-        if dust_model is not None:
-            sed_ds.attrs['dust_model'] = dust_model.encode('utf-8')
-        if dust_law is not None:
-            sed_ds.attrs['dust_law'] = dust_law.encode('utf-8')
-        if dust_params is not None:
-            sed_ds.attrs['dust_params'] = json.dumps(dust_params).encode('utf-8')
+        emission_line_dust = normalize_emission_line_dust(
+            dust_model=dust_model,
+            dust_params=dust_params,
+            dust_law=dust_law,
+            random_uniform_index=random_uniform_index,
+        )
+        if emission_line_dust is not None:
+            sed_ds.attrs['emission_line_dust'] = json.dumps(
+                emission_line_dust
+            ).encode('utf-8')
+            sed_ds.attrs['dust_model'] = emission_line_dust['model'].encode('utf-8')
+            sed_ds.attrs['dust_law'] = emission_line_dust['law'].encode('utf-8')
+            sed_ds.attrs['dust_params'] = json.dumps(
+                emission_line_dust['params']
+            ).encode('utf-8')
+            if emission_line_dust['random_uniform_index'] is not None:
+                sed_ds.attrs['random_uniform_index'] = int(
+                    emission_line_dust['random_uniform_index']
+                )
+        continuum_dust = normalize_continuum_dust(continuum_dust)
+        if continuum_dust is not None:
+            sed_ds.attrs['continuum_dust'] = json.dumps(continuum_dust).encode('utf-8')
         sed_ds.attrs['description'] = description_str
 
     print(f"\nSaved SED datasets to {group_path} in {output_file}")
@@ -603,13 +633,14 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
     )
 
     # ------------------------------------------------------------------
-    # Compute dust-attenuated SEDs (only when dust params are available)
+    # Compute dust-attenuated SEDs (only when dust metadata are available)
     # ------------------------------------------------------------------
     if dust_config is not None:
         print(
             f"\nCalculating dust-attenuated SEDs "
             f"(model: {dust_config['dust_model']}, "
-            f"law: {dust_config['dust_law']})..."
+            f"law: {dust_config['dust_law']}, "
+            f"continuum: {dust_config.get('continuum_dust')})..."
         )
         print("Progress: ", end='', flush=True)
 
@@ -621,6 +652,7 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
             dust_params=dust_config['dust_params'],
             dust_law=dust_config['dust_law'],
             random_uniform_index=dust_config.get('random_uniform_index'),
+            continuum_dust=dust_config.get('continuum_dust'),
             flux_unit=flux_unit,
         )
         print("Done!")
@@ -636,6 +668,8 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
             dust_model=dust_config['dust_model'],
             dust_law=dust_config['dust_law'],
             dust_params=dust_config['dust_params'],
+            random_uniform_index=dust_config.get('random_uniform_index'),
+            continuum_dust=dust_config.get('continuum_dust'),
             flux_unit=flux_unit,
         )
 

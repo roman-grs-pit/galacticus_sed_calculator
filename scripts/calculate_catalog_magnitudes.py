@@ -11,7 +11,6 @@ import numpy as np
 import h5py
 import astropy.units as u
 from astropy.cosmology import FlatLambdaCDM
-import stpsf
 import time
 import shutil
 import os
@@ -29,6 +28,8 @@ from galacticus_sed_calculator.sed_calculator import detect_galacticus_format, o
 from galacticus_sed_calculator.dust_attenuation import (
     dust_attenuation_gb10_generalised,
     read_dust_model_from_catalog,
+    normalize_emission_line_dust,
+    normalize_continuum_dust,
     _calzetti_k_lambda,
 )
 
@@ -45,7 +46,7 @@ _worker_state = {}
 
 def _init_worker(sed_template_file, filter_names, cosmology,
                  dust_model=None, dust_params=None, dust_law='calzetti',
-                 random_uniform_index=None):
+                 random_uniform_index=None, continuum_dust=None):
     """
     Initialize per-worker process state.
 
@@ -54,6 +55,8 @@ def _init_worker(sed_template_file, filter_names, cosmology,
     galaxy tasks assigned to that worker.
     """
     global _worker_state
+    import stpsf
+
     calc = SEDCalculator(sed_template_file, cosmology=cosmology)
     roman = stpsf.WFI()
     bandpasses = {f: roman._get_synphot_bandpass(f) for f in filter_names}
@@ -63,6 +66,7 @@ def _init_worker(sed_template_file, filter_names, cosmology,
     _worker_state['dust_params'] = dust_params
     _worker_state['dust_law'] = dust_law
     _worker_state['random_uniform_index'] = random_uniform_index
+    _worker_state['continuum_dust'] = continuum_dust
 
 
 def _process_galaxy_worker(args):
@@ -94,7 +98,8 @@ def _process_galaxy_worker(args):
             obs_wavelengths=obs_wavelengths
         )
         dust_model = _worker_state.get('dust_model')
-        if dust_model is not None:
+        continuum_dust = _worker_state.get('continuum_dust')
+        if dust_model is not None or continuum_dust is not None:
             result['dust_mags'] = _worker_state['calc'].calculate_magnitudes(
                 working_file,
                 galIndex=i,
@@ -105,6 +110,7 @@ def _process_galaxy_worker(args):
                 dust_params=_worker_state['dust_params'],
                 dust_law=_worker_state['dust_law'],
                 random_uniform_index=_worker_state.get('random_uniform_index'),
+                continuum_dust=continuum_dust,
             )
         return i, result
     except Exception as e:
@@ -120,9 +126,12 @@ def load_dust_config(config_file):
     ----------
     config_file : str
         Path to a YAML file containing the dust model configuration.
-        Required keys: 'dust_model', 'dust_params', 'dust_law'.
-        Optional key: 'random_uniform_index' (int) — column index into the
-        ``nodeData/randomUniform`` dataset for reproducible scatter.
+        Preferred emission-line dust configs use an ``emission_line_dust``
+        block with ``model``, ``params``, ``law``, and optional
+        ``random_uniform_index`` keys. Legacy configs with top-level
+        ``dust_model``, ``dust_params``, ``dust_law``, and optional
+        ``random_uniform_index`` are still supported. For continuum-only
+        dust, provide a ``continuum_dust`` block.
 
     Returns
     -------
@@ -140,43 +149,93 @@ def load_dust_config(config_file):
     --------
     Example config file::
 
-        # Fiducial GB10 dust model — zero scatter
-        dust_model: gb10_generalised
-        dust_params:
-            delta_0: 0.275   # normalisation
-            delta_z: -1.614  # redshift slope
-            delta_M: -0.834  # mass slope
-            delta_Mz: -0.708 # cross term
-            attenuation_scatter: 0.0
-        dust_law: calzetti
+        emission_line_dust:
+            model: gb10_generalised
+            params:
+                delta_0: 0.275   # normalisation
+                delta_z: -1.614  # redshift slope
+                delta_M: -0.834  # mass slope
+                delta_Mz: -0.708 # cross term
+                attenuation_scatter: 0.0
+            law: calzetti
 
     To enable reproducible per-galaxy scatter supply a non-zero
     ``attenuation_scatter`` and add ``random_uniform_index``::
 
         # GB10 dust model with scatter
-        dust_model: gb10_generalised
-        dust_params:
-            delta_0: 0.275
-            delta_z: -1.614
-            delta_M: -0.834
-            delta_Mz: -0.708
-            attenuation_scatter: 0.3
-        dust_law: calzetti
-        # Column index into nodeData/randomUniform for reproducible scatter
-        random_uniform_index: 0
+        emission_line_dust:
+            model: gb10_generalised
+            params:
+                delta_0: 0.275
+                delta_z: -1.614
+                delta_M: -0.834
+                delta_Mz: -0.708
+                attenuation_scatter: 0.3
+            law: calzetti
+            # Column index into nodeData/randomUniform for reproducible scatter
+            random_uniform_index: 0
     """
     with open(config_file, 'r') as f:
-        config = yaml.safe_load(f)
+        config = yaml.safe_load(f) or {}
 
-    for key in ('dust_model', 'dust_params', 'dust_law'):
-        if key not in config:
-            raise ValueError(
-                f"Dust config file '{config_file}' is missing required key '{key}'. "
-                "Required keys: dust_model, dust_params, dust_law."
-            )
+    required_legacy_line_keys = ('dust_model', 'dust_params', 'dust_law')
+    legacy_line_keys = required_legacy_line_keys + ('random_uniform_index',)
+    has_legacy_line_dust = any(key in config for key in legacy_line_keys)
+    has_explicit_line_dust = 'emission_line_dust' in config
+    has_continuum_dust = 'continuum_dust' in config
 
-    random_uniform_index = config.get('random_uniform_index', None)
-    return config['dust_model'], config['dust_params'], config['dust_law'], random_uniform_index
+    if has_explicit_line_dust and has_legacy_line_dust:
+        raise ValueError(
+            f"Dust config file '{config_file}' mixes preferred "
+            "emission_line_dust and legacy dust_model/dust_params/dust_law "
+            "keys. Use only one emission-line dust format."
+        )
+
+    if has_explicit_line_dust:
+        emission_line_dust = normalize_emission_line_dust(
+            config['emission_line_dust']
+        )
+    elif has_legacy_line_dust:
+        for key in required_legacy_line_keys:
+            if key not in config:
+                raise ValueError(
+                    f"Dust config file '{config_file}' is missing required key '{key}'. "
+                    "Legacy emission-line dust configs require dust_model, "
+                    "dust_params, and dust_law."
+                )
+        emission_line_dust = normalize_emission_line_dust(
+            dust_model=config.get('dust_model'),
+            dust_params=config.get('dust_params'),
+            dust_law=config.get('dust_law', 'calzetti'),
+            random_uniform_index=config.get('random_uniform_index', None),
+        )
+    elif not has_continuum_dust:
+        raise ValueError(
+            f"Dust config file '{config_file}' must specify either "
+            "emission_line_dust, legacy emission-line dust keys "
+            "(dust_model, dust_params, dust_law), or continuum_dust."
+        )
+    else:
+        emission_line_dust = None
+
+    if emission_line_dust is None:
+        return None, None, 'calzetti', None
+
+    return (
+        emission_line_dust['model'],
+        emission_line_dust['params'],
+        emission_line_dust['law'],
+        emission_line_dust['random_uniform_index'],
+    )
+
+
+def load_continuum_dust_config(config_file):
+    """
+    Load the optional continuum dust block from a YAML dust config file.
+    """
+    with open(config_file, 'r') as f:
+        config = yaml.safe_load(f) or {}
+    return normalize_continuum_dust(config.get('continuum_dust'))
 
 
 def calculate_dust_attenuated_emission_lines(galacticus_file, base_path, format_type,
@@ -329,7 +388,8 @@ def calculate_dust_attenuated_emission_lines(galacticus_file, base_path, format_
 
 
 def save_dust_model_metadata(group, dust_model, dust_params, dust_law,
-                             random_uniform_index=None):
+                             random_uniform_index=None,
+                             continuum_dust=None):
     """
     Attach dust model metadata as attributes to an HDF5 group.
 
@@ -338,23 +398,53 @@ def save_dust_model_metadata(group, dust_model, dust_params, dust_law,
     group : h5py.Group
         The HDF5 group to which the attributes will be attached (typically the
         ``dustAttenuatedNodeData`` group).
-    dust_model : str
-        Name of the dust model.
+    dust_model : str or None
+        Name of the emission-line dust model.
     dust_params : dict
-        Dictionary of dust model parameters.  Stored as a JSON string under the
-        ``dust_params`` attribute so that the nested structure is preserved.
+        Dictionary of emission-line dust model parameters.
     dust_law : str
-        Name of the attenuation law.
+        Name of the emission-line attenuation law.
     random_uniform_index : int or None, optional
         Column index into ``nodeData/randomUniform`` used for reproducible
         per-galaxy scatter.  Stored as the ``random_uniform_index`` attribute
         when not ``None``; the attribute is omitted otherwise.
+    continuum_dust : dict, float, or None, optional
+        Continuum dust configuration. Stored as JSON under the
+        ``continuum_dust`` attribute when not ``None``.
+
+    Notes
+    -----
+    The preferred HDF5 metadata format stores emission-line dust as a single
+    JSON ``emission_line_dust`` attribute. Legacy ``dust_model``,
+    ``dust_law``, ``dust_params``, and ``random_uniform_index`` attributes are
+    also written so older readers can still interpret the catalog.
     """
-    group.attrs['dust_model'] = dust_model
-    group.attrs['dust_law'] = dust_law
-    group.attrs['dust_params'] = json.dumps(dust_params)
-    if random_uniform_index is not None:
-        group.attrs['random_uniform_index'] = int(random_uniform_index)
+    for key in ('dust_model', 'dust_law', 'dust_params',
+                'random_uniform_index', 'emission_line_dust',
+                'continuum_dust'):
+        if key in group.attrs:
+            del group.attrs[key]
+
+    emission_line_dust = normalize_emission_line_dust(
+        dust_model=dust_model,
+        dust_params=dust_params,
+        dust_law=dust_law,
+        random_uniform_index=random_uniform_index,
+    )
+    if emission_line_dust is not None:
+        group.attrs['emission_line_dust'] = json.dumps(emission_line_dust)
+        # Legacy attributes are retained so older readers can still understand
+        # emission-line dust metadata written by newer code.
+        group.attrs['dust_model'] = emission_line_dust['model']
+        group.attrs['dust_law'] = emission_line_dust['law']
+        group.attrs['dust_params'] = json.dumps(emission_line_dust['params'])
+        if emission_line_dust['random_uniform_index'] is not None:
+            group.attrs['random_uniform_index'] = int(
+                emission_line_dust['random_uniform_index']
+            )
+    continuum_dust = normalize_continuum_dust(continuum_dust)
+    if continuum_dust is not None:
+        group.attrs['continuum_dust'] = json.dumps(continuum_dust)
 
 
 def load_roman_bandpasses(filter_names):
@@ -373,6 +463,8 @@ def load_roman_bandpasses(filter_names):
     bandpasses : dict
         Dictionary mapping filter names to synphot SpectralElement objects
     """
+    import stpsf
+
     print("Loading Roman WFI bandpass filters...")
     roman = stpsf.WFI()
     bandpasses = {}
@@ -410,7 +502,8 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                                  save_to_input=False, copy_input=True,
                                  check_existing=True, obs_wavelengths=None,
                                  n_jobs=1, dust_model=None, dust_params=None,
-                                 dust_law='calzetti', random_uniform_index=None):
+                                 dust_law='calzetti', random_uniform_index=None,
+                                 continuum_dust=None):
     """
     Calculate magnitudes for all galaxies in a Galacticus catalog.
     
@@ -453,10 +546,11 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         than 1 request that exact number of workers.
     dust_model : str, optional
         Dust attenuation model to use for emission lines. When provided,
-        dust-attenuated magnitudes (``dustAttenuatedApparentMagnitudeRomanWFI:<filter>``)
+        dust-attenuated magnitudes
+        (``dustAttenuatedNodeData/apparentMagnitudeRomanWFI:<filter>``)
         and emission line luminosities
-        (``dustAttenuatedLuminosityEmissionLine*``) are also saved, together
-        with a ``DustModel`` metadata group.
+        (``dustAttenuatedNodeData/luminosityEmissionLine*``) are also saved,
+        together with dust metadata on the ``dustAttenuatedNodeData`` group.
         Currently only ``'gb10_generalised'`` is supported. Default is None.
     dust_params : dict, optional
         Parameters for the dust model. Required when ``dust_model`` is not None.
@@ -470,6 +564,11 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         giving consistent, reproducible results.  Has no effect when
         ``dust_model`` is None or ``attenuation_scatter`` in ``dust_params``
         is 0.  Default is None (random scatter drawn fresh each run).
+    continuum_dust : dict, float, or None, optional
+        Continuum dust attenuation model. ``None`` applies no continuum
+        attenuation. A scalar is interpreted as a fixed ``A_V`` using the
+        Calzetti law. A dictionary can specify the model explicitly, e.g.
+        ``{'model': 'fixed_av', 'params': {'A_V': 1.0}, 'law': 'calzetti'}``.
     
     Returns
     -------
@@ -563,9 +662,12 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         n_galaxies = n_galaxies_total
         print(f"Processing all {n_galaxies} galaxies")
     
+    continuum_dust = normalize_continuum_dust(continuum_dust)
+    has_dust = dust_model is not None or continuum_dust is not None
+
     # Initialize arrays to store results
     magnitude_array = np.full((n_galaxies, n_filters), np.nan)
-    if dust_model is not None:
+    if has_dust:
         dust_magnitude_array = np.full((n_galaxies, n_filters), np.nan)
     redshifts = np.zeros(n_galaxies)
     
@@ -590,8 +692,12 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     print(f"\nCalculating magnitudes in {n_filters} filters for {n_galaxies} galaxies...")
     if actual_n_jobs > 1:
         print(f"Using {actual_n_jobs} parallel worker processes")
-    if dust_model is not None:
-        print(f"Dust model: {dust_model} (computing dust-attenuated magnitudes too)")
+    if has_dust:
+        print("Dust attenuation: computing dust-attenuated magnitudes too")
+        if dust_model is not None:
+            print(f"  Emission-line dust model: {dust_model}")
+        if continuum_dust is not None:
+            print(f"  Continuum dust: {continuum_dust}")
     print("Progress: ", end='', flush=True)
 
     start_time = time.time()
@@ -622,7 +728,7 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                     magnitude_array[i, j] = mags[filter_name]
 
                 # Calculate dust-attenuated magnitudes if requested
-                if dust_model is not None:
+                if has_dust:
                     dust_mags = calc.calculate_magnitudes(
                         working_file,
                         galIndex=i,
@@ -633,6 +739,7 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                         dust_params=dust_params,
                         dust_law=dust_law,
                         random_uniform_index=random_uniform_index,
+                        continuum_dust=continuum_dust,
                     )
                     for j, filter_name in enumerate(filter_names):
                         dust_magnitude_array[i, j] = dust_mags[filter_name]
@@ -651,7 +758,8 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
             processes=actual_n_jobs,
             initializer=_init_worker,
             initargs=(sed_template_file, filter_names, cosmology,
-                      dust_model, dust_params, dust_law, random_uniform_index)
+                      dust_model, dust_params, dust_law, random_uniform_index,
+                      continuum_dust)
         ) as pool:
             n_done = 0
             for i, result in pool.imap_unordered(_process_galaxy_worker, worker_args):
@@ -664,7 +772,7 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                 if result is not None:
                     for j, filter_name in enumerate(filter_names):
                         magnitude_array[i, j] = result['mags'][filter_name]
-                    if dust_model is not None and 'dust_mags' in result:
+                    if has_dust and 'dust_mags' in result:
                         for j, filter_name in enumerate(filter_names):
                             dust_magnitude_array[i, j] = result['dust_mags'][filter_name]
                 # If result is None the rows stay as NaN (already initialised)
@@ -685,20 +793,22 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     }
 
     # Add dust results if a dust model was specified
-    if dust_model is not None:
+    if has_dust:
         results['dust_magnitudes'] = dust_magnitude_array
         results['dust_model'] = dust_model
         results['dust_params'] = dust_params
         results['dust_law'] = dust_law
         results['random_uniform_index'] = random_uniform_index
-        print(f"\nCalculating dust-attenuated emission line luminosities...")
-        results['dust_emission_lines'] = calculate_dust_attenuated_emission_lines(
-            working_file, base_path, format_type,
-            dust_model, dust_params, dust_law,
-            n_galaxies=n_galaxies,
-            random_uniform_index=random_uniform_index,
-        )
-        print(f"  Computed {len(results['dust_emission_lines'])} dust-attenuated emission line datasets")
+        results['continuum_dust'] = continuum_dust
+        if dust_model is not None:
+            print(f"\nCalculating dust-attenuated emission line luminosities...")
+            results['dust_emission_lines'] = calculate_dust_attenuated_emission_lines(
+                working_file, base_path, format_type,
+                dust_model, dust_params, dust_law,
+                n_galaxies=n_galaxies,
+                random_uniform_index=random_uniform_index,
+            )
+            print(f"  Computed {len(results['dust_emission_lines'])} dust-attenuated emission line datasets")
     
     # Save to file
     if save_to_input:
@@ -746,8 +856,12 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
         /Lightcone/Output1/dustAttenuatedNodeData/luminosityEmissionLineDisk:balmerAlpha6565
 
     The dust model used is recorded as attributes of the
-    ``dustAttenuatedNodeData`` group (``dust_model``, ``dust_law``,
-    ``dust_params`` stored as a JSON string).
+    ``dustAttenuatedNodeData`` group. Emission-line dust metadata are stored
+    in the preferred ``emission_line_dust`` JSON attribute, while legacy
+    ``dust_model``, ``dust_law``, ``dust_params`` (JSON), and
+    ``random_uniform_index`` attributes are retained for backwards
+    compatibility. Continuum dust metadata are stored as ``continuum_dust``
+    (JSON) when present.
     
     Parameters
     ----------
@@ -822,10 +936,11 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
             # Attach dust model metadata to the group
             save_dust_model_metadata(
                 dust_group,
-                results['dust_model'],
-                results['dust_params'],
-                results['dust_law'],
+                results.get('dust_model'),
+                results.get('dust_params'),
+                results.get('dust_law', 'calzetti'),
                 random_uniform_index=results.get('random_uniform_index'),
+                continuum_dust=results.get('continuum_dust'),
             )
 
             # Dust-attenuated magnitudes (same dataset names as dust-free)
@@ -940,10 +1055,12 @@ def parse_arguments():
                        help='Path to a YAML file specifying the dust attenuation model.  '
                             'When provided, dust-attenuated magnitudes '
                             '(dustAttenuatedNodeData/apparentMagnitudeRomanWFI:<filter>) and '
-                            'emission line luminosities '
+                            'any configured emission line luminosities '
                             '(dustAttenuatedNodeData/luminosityEmissionLine*) are also saved, '
                             'together with dust model metadata on the dustAttenuatedNodeData group.  '
-                            'Required YAML keys: dust_model, dust_params, dust_law.')
+                            'Use emission_line_dust for emission lines '
+                            '(legacy dust_model/dust_params/dust_law configs are still supported) '
+                            'and/or continuum_dust for continuum attenuation.')
     
     return parser.parse_args()
 
@@ -982,17 +1099,21 @@ def main():
     dust_params = None
     dust_law = 'calzetti'
     random_uniform_index = None
+    continuum_dust = None
     if args.dust_config:
         if not os.path.exists(args.dust_config):
             print(f"\nError: Dust config file not found: {args.dust_config}")
             sys.exit(1)
         print(f"\nLoading dust config from: {args.dust_config}")
         dust_model, dust_params, dust_law, random_uniform_index = load_dust_config(args.dust_config)
+        continuum_dust = load_continuum_dust_config(args.dust_config)
         print(f"  dust_model: {dust_model}")
         print(f"  dust_law:   {dust_law}")
         print(f"  dust_params: {dust_params}")
         if random_uniform_index is not None:
             print(f"  random_uniform_index: {random_uniform_index}")
+        if continuum_dust is not None:
+            print(f"  continuum_dust: {continuum_dust}")
     
     # Create wavelength grid
     obs_wavelengths = np.linspace(args.wavelength_min, args.wavelength_max, 
@@ -1036,6 +1157,7 @@ def main():
         dust_params=dust_params,
         dust_law=dust_law,
         random_uniform_index=random_uniform_index,
+        continuum_dust=continuum_dust,
     )
     
     if results is not None:

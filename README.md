@@ -148,6 +148,49 @@ magnitudes = calc.calculate_magnitudes(
 )
 ```
 
+### Continuum Dust Attenuation
+
+Continuum attenuation can be applied with a compact dust configuration.  The
+current built-in model is a fixed Calzetti-law `A_V` for all galaxies:
+
+```python
+continuum_dust = {
+    'model': 'fixed_av',
+    'params': {'A_V': 1.0},
+    'law': 'calzetti',
+}
+
+spectrum = calc.evaluate_total_spectrum(
+    'galacticus_output.hdf5',
+    galIndex=0,
+    obs_wavelengths=np.linspace(8000, 30000, 1000) * u.AA,
+    continuum_dust=continuum_dust,
+)
+```
+
+For `scripts/calculate_catalog_magnitudes.py --dust-config`, add the same block
+to the YAML config. Emission-line dust should be described separately with
+`emission_line_dust`; older configs using top-level `dust_model`,
+`dust_params`, and `dust_law` are still supported.
+
+```yaml
+emission_line_dust:
+  model: gb10_generalised
+  params:
+    delta_0: 0.2772
+    delta_z: -1.5792
+    delta_M: -0.8180
+    delta_Mz: -0.5287
+    attenuation_scatter: 0.25
+  law: calzetti
+  random_uniform_index: 0
+continuum_dust:
+  model: fixed_av
+  params:
+    A_V: 1.0
+  law: calzetti
+```
+
 ### Calculate RA and Dec Coordinates
 
 For lightcone catalogs, convert the angular positions (theta, phi) to astronomical RA and Dec coordinates:
