@@ -30,6 +30,10 @@ from galacticus_sed_calculator.diagnostics.f158 import (  # noqa: E402
     F158DiagnosticsConfig,
     run_f158_diagnostics,
 )
+from galacticus_sed_calculator.diagnostics.smhm import (  # noqa: E402
+    SMHMDiagnosticsConfig,
+    run_smhm_diagnostics,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -46,6 +50,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--skip-bad-files", action="store_true")
     parser.add_argument("--no-f158", action="store_true", help="Do not make F158 n(z)/magnitude diagnostics.")
     parser.add_argument("--no-emission-lines", action="store_true", help="Do not make emission-line LF diagnostics.")
+    parser.add_argument("--no-smhm", action="store_true", help="Do not make stellar mass-halo mass diagnostics.")
     parser.add_argument("--unit-realization-scale", default="auto")
     parser.add_argument("--unit-realization-total", type=int, default=10000)
     parser.add_argument("--redshift-dataset", default="lightconeRedshiftObserved")
@@ -71,6 +76,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--halo-sample-seed", type=int, default=12345)
     parser.add_argument("--halo-summary-dz", type=float, default=0.25)
     parser.add_argument("--halo-mass-resolution", type=float, default=None)
+    parser.add_argument("--smhm-z-centers", nargs="+", type=float, default=[0.0, 1.0, 2.0])
+    parser.add_argument("--smhm-z-half-width", type=float, default=0.10)
+    parser.add_argument("--smhm-output-redshift-tolerance", type=float, default=None)
+    parser.add_argument("--smhm-log10-halo-mass-min", type=float, default=9.5)
+    parser.add_argument("--smhm-log10-halo-mass-max", type=float, default=15.0)
+    parser.add_argument("--smhm-log10-halo-mass-bin-width", type=float, default=0.25)
+    parser.add_argument("--smhm-disk-stellar-mass-dataset", default="diskMassStellar")
+    parser.add_argument("--smhm-spheroid-stellar-mass-dataset", default="spheroidMassStellar")
+    parser.add_argument("--smhm-selection", choices=["all", "centrals", "satellites"], default="all")
+    parser.add_argument("--smhm-fill-missing-node-weights-with-median", action="store_true")
     parser.add_argument("--plot-individual-files", action="store_true")
     parser.add_argument("--individual-file-alpha", type=float, default=0.06)
     parser.add_argument("--cosmos-web-catalog", type=Path, default=None)
@@ -230,6 +245,32 @@ def main() -> None:
             halpha_target_hdf5=args.halpha_target_hdf5,
             point_redshift_half_width=args.point_redshift_half_width,
             dpi=args.dpi,
+        )
+    if not args.no_smhm:
+        smhm_config = SMHMDiagnosticsConfig(
+            halo_mass_dataset=args.halo_mass_dataset,
+            disk_stellar_mass_dataset=args.smhm_disk_stellar_mass_dataset,
+            spheroid_stellar_mass_dataset=args.smhm_spheroid_stellar_mass_dataset,
+            redshift_dataset=args.redshift_dataset,
+            z_centers=tuple(args.smhm_z_centers),
+            z_half_width=args.smhm_z_half_width,
+            output_redshift_tolerance=args.smhm_output_redshift_tolerance,
+            log10_halo_mass_min=args.smhm_log10_halo_mass_min,
+            log10_halo_mass_max=args.smhm_log10_halo_mass_max,
+            log10_halo_mass_bin_width=args.smhm_log10_halo_mass_bin_width,
+            angular_weight_mode=args.angular_weight_mode,
+            unit_realization_scale=args.unit_realization_scale,
+            unit_realization_total=args.unit_realization_total,
+            galaxy_selection=args.smhm_selection,
+            fill_missing_node_weights_with_median=args.smhm_fill_missing_node_weights_with_median,
+            dpi=args.dpi,
+        )
+        results["smhm"] = run_smhm_diagnostics(
+            paths,
+            output_dir=output_dir,
+            data_dir=data_dir,
+            config=smhm_config,
+            skip_bad_files=args.skip_bad_files,
         )
 
     config_dump = {
