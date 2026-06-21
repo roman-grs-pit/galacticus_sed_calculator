@@ -473,6 +473,31 @@ class TestCopyGalaxyData(unittest.TestCase):
                 dm = dm.decode('utf-8')
             self.assertEqual(dm, 'gb10_generalised')
 
+    def test_singleton_datasets_are_copied_without_slicing(self):
+        """Metadata-like datasets with length one should be copied verbatim."""
+        _add_dust_attenuated_node_data(self.src, n_gals=10)
+        with h5py.File(self.src, 'a') as f:
+            f['Lightcone/Output1/nodeData'].create_dataset(
+                'singletonNodeMetadata', data=np.array([42.0])
+            )
+            f['Lightcone/Output1/dustAttenuatedNodeData'].create_dataset(
+                'singletonDustMetadata', data=np.array([3.14])
+            )
+
+        selected = np.array([1, 3, 7])
+        copy_galaxy_data(self.src, self.dst, selected, '/Lightcone/Output1')
+
+        with h5py.File(self.dst, 'r') as f:
+            node_meta = f[
+                'Lightcone/Output1/nodeData/singletonNodeMetadata'
+            ][:]
+            dust_meta = f[
+                'Lightcone/Output1/dustAttenuatedNodeData/'
+                'singletonDustMetadata'
+            ][:]
+        np.testing.assert_array_equal(node_meta, np.array([42.0]))
+        np.testing.assert_array_equal(dust_meta, np.array([3.14]))
+
 
 # ---------------------------------------------------------------------------
 # Tests for parse_property_cuts

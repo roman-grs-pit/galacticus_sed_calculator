@@ -271,6 +271,8 @@ def copy_galaxy_data(input_file, output_file, selected_indices, base_path):
     """
     selected_indices = np.asarray(selected_indices)
 
+    n_galaxies = _get_n_galaxies(input_file, base_path)
+
     with h5py.File(input_file, 'r') as src, h5py.File(output_file, 'w') as dst:
 
         # Copy the Parameters group verbatim (contains cosmology, model config)
@@ -289,17 +291,28 @@ def copy_galaxy_data(input_file, output_file, selected_indices, base_path):
                 dst_group.attrs[key] = val
 
         def _copy_group_sliced(src_group, dst_group):
-            """Copy all datasets in src_group, sliced to selected_indices."""
+            """Copy per-galaxy datasets sliced to selected_indices.
+
+            Some Galacticus groups also contain scalar/singleton metadata-like
+            datasets.  Those do not have one row per galaxy and should be
+            copied verbatim rather than indexed by galaxy number.
+            """
             for ds_name in src_group.keys():
-                src_ds = src_group[ds_name]
-                data = src_ds[:]
-                new_data = data[selected_indices]
-                dst_ds = dst_group.create_dataset(
-                    ds_name, data=new_data,
-                    compression='gzip', compression_opts=4,
-                )
-                for key, val in src_ds.attrs.items():
-                    dst_ds.attrs[key] = val
+                src_obj = src_group[ds_name]
+                if isinstance(src_obj, h5py.Group):
+                    src_group.copy(ds_name, dst_group)
+                    continue
+
+                if src_obj.shape and src_obj.shape[0] == n_galaxies:
+                    new_data = src_obj[selected_indices, ...]
+                    dst_ds = dst_group.create_dataset(
+                        ds_name, data=new_data,
+                        compression='gzip', compression_opts=4,
+                    )
+                    for key, val in src_obj.attrs.items():
+                        dst_ds.attrs[key] = val
+                else:
+                    src_group.copy(ds_name, dst_group)
 
         # Slice all nodeData datasets to the selected rows
         node_data_path = f'{base_path}/nodeData'
