@@ -3,6 +3,12 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Local filesystem metadata
+.DS_Store
+
+# Generated example figures
+examples/dust_attenuation_example.png
+
 # C extensions
 *.so
 
