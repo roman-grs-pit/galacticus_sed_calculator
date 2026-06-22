@@ -15,7 +15,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from galacticus_sed_calculator import SEDCalculator
 
-def test_performance():
+def run_performance_comparison():
     """Test and compare performance of synphot vs fast path."""
     
     # Setup
@@ -116,7 +116,7 @@ def test_performance():
         include_emission_lines=False,
         use_synphot=True
     )
-    wav_fast, flux_fast = calc.evaluate_component_spectrum(
+    spectrum_fast = calc.evaluate_component_spectrum(
         galacticus_file,
         galIndex=0,
         component='disk',
@@ -126,6 +126,7 @@ def test_performance():
     )
     
     flux_synphot = spectrum_synphot(wavelengths, flux_unit='FNU')
+    flux_fast = spectrum_fast(wavelengths, flux_unit='FNU')
     flux_synphot_val = flux_synphot.to_value(u.Lsun / (u.Hz * u.Mpc**2))
     flux_fast_val = flux_fast.to_value(u.Lsun / (u.Hz * u.Mpc**2))
     
@@ -135,4 +136,4 @@ def test_performance():
     print()
 
 if __name__ == '__main__':
-    test_performance()
+    run_performance_comparison()

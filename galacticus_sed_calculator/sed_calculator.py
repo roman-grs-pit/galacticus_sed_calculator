@@ -1301,6 +1301,13 @@ class SEDCalculator:
         3. Use the same obs_wavelengths for all galaxies
         """
         from synphot import Observation
+
+        valid_magnitude_systems = ['AB', 'ST', 'Vega']
+        if magnitude_system not in valid_magnitude_systems:
+            raise ValueError(
+                f"Invalid magnitude_system '{magnitude_system}'. Must be one "
+                f"of {valid_magnitude_systems}."
+            )
         
         # Get the spectrum for the specified component
         if component == 'total':
@@ -1342,8 +1349,6 @@ class SEDCalculator:
                     # Vega magnitudes require a Vega spectrum
                     vega = SourceSpectrum.from_vega()
                     mag = obs.effstim(flux_unit='vegamag', vegaspec=vega)
-                else:
-                    raise ValueError(f"Invalid magnitude_system '{magnitude_system}'. Must be 'AB', 'ST', or 'Vega'.")
                 
                 magnitudes[filter_name] = mag.value
                 

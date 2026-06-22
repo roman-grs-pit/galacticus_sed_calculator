@@ -15,6 +15,9 @@ Or install with optional dependencies:
 # For running the scripts
 pip install -e ".[scripts]"
 
+# For mock-catalog diagnostic plots
+pip install -e ".[diagnostics]"
+
 # For development and testing
 pip install -e ".[dev]"
 ```
@@ -68,6 +71,35 @@ The format is automatically detected - no configuration needed!
 ## Usage
 
 For usage examples, see [exampleUsage.ipynb](examples/exampleUsage.ipynb).
+
+### Mock Catalog Diagnostics
+
+The standard Roman mock-catalog QA plots can be generated with:
+
+```bash
+python scripts/diagnostics/run_mock_catalog_diagnostics.py \
+  --input-glob '../galaxyCatalogs/romanUNIT-d*_16sqDeg.hdf5' \
+  --output-dir diagnostics \
+  --skip-bad-files
+```
+
+This writes the headline figures directly to `diagnostics/`:
+
+- `f158_nz.png`
+- `f158_apparent_magnitude_distributions.png`
+- `emission_line_lfs_halpha.png`
+- `emission_line_lfs_oiii_hbeta.png`
+- `emission_line_lfs_oii_khostovan.png`
+- `emission_line_lfs_oii_comparat.png`
+
+CSV products go in `diagnostics/data/`, and command/config/catalog provenance
+goes in `diagnostics/metadata/`. The F158 diagnostics use dust-attenuated
+`apparentMagnitudeRomanWFI:F158` by default, while the emission-line LFs use the
+dust-attenuated emission-line luminosities.
+
+By default, the F158 plots include a bundled binned COSMOS-Web/COSMOS2025 F150W
+reference. To regenerate that comparison from a full object catalog, pass
+`--cosmos-web-catalog /path/to/cosmos2025_f150w_catalog.csv`.
 
 ### Basic Example
 
