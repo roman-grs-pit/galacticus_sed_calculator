@@ -12,6 +12,18 @@ import astropy.units as u
 # Add parent directory to path to import galacticus_sed_calculator
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from galacticus_sed_calculator import SEDCalculator
+from galacticus_sed_calculator.sed_calculator import (
+    age_of_universe_to_lookback_time,
+    detect_galacticus_format,
+    gaussian_emission_line,
+    gaussian_from_fwhm,
+    outputTime_to_redshift,
+)
+
+
+def add_lightcone_skeleton(handle):
+    """Add enough lightcone structure for format detection."""
+    handle.require_group('/Lightcone/Output1/nodeData')
 
 
 class TestSEDTemplateParameterExtraction(unittest.TestCase):
@@ -87,6 +99,7 @@ class TestSFHCompatibilityValidation(unittest.TestCase):
             with h5py.File(self.galacticus_file, 'r') as src:
                 with h5py.File(tmp_filename, 'w') as dst:
                     src.copy('/Parameters', dst)
+                    add_lightcone_skeleton(dst)
                     dst['/Parameters/starFormationHistory'].attrs['countAges'] = 40
             
             # Should raise ValueError
@@ -108,6 +121,7 @@ class TestSFHCompatibilityValidation(unittest.TestCase):
             with h5py.File(self.galacticus_file, 'r') as src:
                 with h5py.File(tmp_filename, 'w') as dst:
                     src.copy('/Parameters', dst)
+                    add_lightcone_skeleton(dst)
                     dst['/Parameters/starFormationHistory'].attrs['countMetallicities'] = 8
             
             # Should raise ValueError
@@ -129,6 +143,7 @@ class TestSFHCompatibilityValidation(unittest.TestCase):
             with h5py.File(self.galacticus_file, 'r') as src:
                 with h5py.File(tmp_filename, 'w') as dst:
                     src.copy('/Parameters', dst)
+                    add_lightcone_skeleton(dst)
                     dst['/Parameters/starFormationHistory'].attrs['metallicityMaximum'] = 5.0
             
             # Should raise ValueError
@@ -161,6 +176,7 @@ class TestSFHCompatibilityValidation(unittest.TestCase):
             # Create a file without SFH parameters
             with h5py.File(tmp_filename, 'w') as dst:
                 dst.create_group('/Parameters')
+                add_lightcone_skeleton(dst)
             
             # Should raise ValueError
             with self.assertRaises(ValueError) as context:
@@ -390,8 +406,6 @@ class TestFormatDetection(unittest.TestCase):
     
     def test_detect_lightcone_format(self):
         """Test detection of lightcone format."""
-        from SEDfromSFH import detect_galacticus_format
-        
         format_type, base_path = detect_galacticus_format(self.lightcone_file)
         
         self.assertEqual(format_type, 'lightcone')
@@ -399,9 +413,6 @@ class TestFormatDetection(unittest.TestCase):
     
     def test_detect_fixed_time_format(self):
         """Test detection of fixed-time format."""
-        from SEDfromSFH import detect_galacticus_format
-        from astropy.cosmology import Planck15
-        
         # Create a minimal fixed-time format file
         with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
             tmp_filename = tmp.name
@@ -422,8 +433,6 @@ class TestFormatDetection(unittest.TestCase):
     
     def test_detect_format_raises_on_invalid_file(self):
         """Test that format detection fails gracefully on invalid files."""
-        from SEDfromSFH import detect_galacticus_format
-        
         with tempfile.NamedTemporaryFile(suffix='.hdf5', delete=False) as tmp:
             tmp_filename = tmp.name
         
@@ -446,7 +455,6 @@ class TestTimeConversion(unittest.TestCase):
     
     def test_outputTime_to_redshift(self):
         """Test conversion from age of universe to redshift."""
-        from SEDfromSFH import outputTime_to_redshift
         from astropy.cosmology import Planck15
         
         # Test at a known redshift
@@ -458,8 +466,6 @@ class TestTimeConversion(unittest.TestCase):
     
     def test_age_of_universe_to_lookback_time(self):
         """Test conversion from age of universe to lookback time."""
-        from SEDfromSFH import age_of_universe_to_lookback_time
-        
         outputTime = 10.0  # Gyr
         ages = np.array([2.0, 5.0, 8.0, 10.0])
         
@@ -470,8 +476,6 @@ class TestTimeConversion(unittest.TestCase):
     
     def test_age_of_universe_to_lookback_time_handles_negative(self):
         """Test that negative lookback times are clamped to zero."""
-        from SEDfromSFH import age_of_universe_to_lookback_time
-        
         outputTime = 10.0
         ages = np.array([5.0, 10.0, 10.1])  # Last one would give negative lookback
         
@@ -1115,7 +1119,6 @@ class TestFastSEDGeneration(unittest.TestCase):
     
     def test_gaussian_helper_functions(self):
         """Test the Gaussian emission line helper functions."""
-        from SEDfromSFH import gaussian_emission_line, gaussian_from_fwhm
         import astropy.units as u
         
         # Test parameters
