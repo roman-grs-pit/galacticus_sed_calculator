@@ -15,6 +15,8 @@ from galacticus_sed_calculator import SEDCalculator
 from galacticus_sed_calculator.dust_attenuation import (
     apply_dust_attenuation_to_continuum,
     calzetti_attenuation_law,
+    dust_attenuation_garnBest10,
+    dust_attenuation_gb10_generalised,
     normalize_continuum_dust,
 )
 
@@ -62,6 +64,34 @@ class TestContinuumDustHelpers(unittest.TestCase):
     def test_unknown_continuum_dust_model_raises(self):
         with self.assertRaises(ValueError):
             normalize_continuum_dust({'model': 'not_yet_supported'})
+
+
+class TestDustRandomUniformScatter(unittest.TestCase):
+    """Test robust handling of stored uniform deviates for dust scatter."""
+
+    def test_garn_best_scatter_clips_uniform_endpoints(self):
+        attenuation = dust_attenuation_garnBest10(
+            np.array([1.0e10, 1.0e10]),
+            attenuation_scatter=1.0,
+            random_uniform=np.array([0.0, 1.0]),
+        )
+
+        self.assertTrue(np.all(np.isfinite(attenuation)))
+        self.assertGreater(attenuation[1], attenuation[0])
+        self.assertLess(attenuation[1], 5.0)
+
+    def test_generalised_scatter_clips_uniform_endpoints(self):
+        attenuation = dust_attenuation_gb10_generalised(
+            np.array([1.0e10, 1.0e10]),
+            np.array([1.0, 1.0]),
+            attenuation_scatter=1.0,
+            random_uniform=np.array([0.0, 1.0]),
+        )
+
+        self.assertTrue(np.all(np.isfinite(attenuation)))
+        self.assertEqual(attenuation[0], 0.0)
+        self.assertGreater(attenuation[1], attenuation[0])
+        self.assertLess(attenuation[1], 5.0)
 
 
 class TestContinuumDustSEDIntegration(unittest.TestCase):
