@@ -16,6 +16,10 @@ import astropy.constants as const
 from typing import Union, List, Optional, Tuple, Callable
 
 
+CALZETTI_MIN_WAVELENGTH_MICRON = 0.12
+CALZETTI_MAX_WAVELENGTH_MICRON = 2.20
+
+
 def dust_attenuation_garnBest10(
     Mstar: np.ndarray, 
     attenuation_scatter: float = 0.0,
@@ -212,8 +216,14 @@ def calzetti_attenuation_law(wavelength, A_V=1.0):
     else:
         wavelength_AA = np.atleast_1d(wavelength).astype(float)
     
-    # Convert wavelength from Angstroms to microns for the Calzetti formula
-    wavelength_micron = wavelength_AA / 10000.0
+    # Convert wavelength from Angstroms to microns for the Calzetti formula.
+    # Outside the empirical Calzetti et al. range, use the nearest edge value
+    # rather than extrapolating the polynomial.
+    wavelength_micron = np.clip(
+        wavelength_AA / 10000.0,
+        CALZETTI_MIN_WAVELENGTH_MICRON,
+        CALZETTI_MAX_WAVELENGTH_MICRON,
+    )
     
     # Calzetti R_V value for starburst galaxies
     R_V = 4.05
@@ -517,7 +527,11 @@ def _calzetti_k_lambda(wavelength_AA):
     k_lambda : float
         The k(lambda) value at the specified wavelength.
     """
-    wavelength_micron = wavelength_AA / 10000.0
+    wavelength_micron = np.clip(
+        wavelength_AA / 10000.0,
+        CALZETTI_MIN_WAVELENGTH_MICRON,
+        CALZETTI_MAX_WAVELENGTH_MICRON,
+    )
     R_V = 4.05
     
     if wavelength_micron >= 0.63:

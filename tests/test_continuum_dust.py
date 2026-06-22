@@ -39,6 +39,13 @@ class TestContinuumDustHelpers(unittest.TestCase):
         np.testing.assert_allclose(A_int, A_float)
         self.assertGreater(A_int[0], 0.0)
 
+    def test_calzetti_uses_edge_values_outside_valid_range(self):
+        wavelengths = np.array([900.0, 1200.0, 22000.0, 30000.0])
+        attenuation = calzetti_attenuation_law(wavelengths, A_V=1.0)
+
+        self.assertAlmostEqual(attenuation[0], attenuation[1])
+        self.assertAlmostEqual(attenuation[2], attenuation[3])
+
     def test_apply_continuum_dust_matches_calzetti_factor(self):
         wavelengths = np.array([1500.0, 5500.0, 10000.0])
         flux = np.ones_like(wavelengths)
