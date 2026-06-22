@@ -18,6 +18,19 @@ from typing import Union, List, Optional, Tuple, Callable
 
 CALZETTI_MIN_WAVELENGTH_MICRON = 0.12
 CALZETTI_MAX_WAVELENGTH_MICRON = 2.20
+RANDOM_UNIFORM_CLIP_EPSILON = 1.0e-4
+
+
+def _normal_deviates_from_uniform(random_uniform: np.ndarray) -> np.ndarray:
+    """Convert stored uniform deviates to bounded normal deviates."""
+    from scipy.stats import norm
+
+    clipped = np.clip(
+        np.asarray(random_uniform, dtype=float),
+        RANDOM_UNIFORM_CLIP_EPSILON,
+        1.0 - RANDOM_UNIFORM_CLIP_EPSILON,
+    )
+    return norm.ppf(clipped)
 
 
 def dust_attenuation_garnBest10(
@@ -56,8 +69,7 @@ def dust_attenuation_garnBest10(
     if attenuation_scatter > 0:
         if random_uniform is not None:
             # Convert uniform(0,1) to standard normal via inverse CDF
-            from scipy.stats import norm
-            random_normal = norm.ppf(random_uniform)
+            random_normal = _normal_deviates_from_uniform(random_uniform)
             A_Halpha = A_Halpha + random_normal * attenuation_scatter
         else:
             A_Halpha = A_Halpha + np.random.randn(len(X)) * attenuation_scatter
@@ -134,8 +146,7 @@ def dust_attenuation_gb10_generalised(
     if attenuation_scatter > 0:
         if random_uniform is not None:
             # Convert uniform(0,1) to standard normal via inverse CDF
-            from scipy.stats import norm
-            random_normal = norm.ppf(random_uniform)
+            random_normal = _normal_deviates_from_uniform(random_uniform)
             A_Halpha = A_Halpha + random_normal * attenuation_scatter
         else:
             if rng is None:
