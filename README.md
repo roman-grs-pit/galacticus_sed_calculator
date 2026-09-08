@@ -191,7 +191,9 @@ python -m pytest
 ```
 
 GitHub Actions runs the tests on each supported Python version and performs a
-one-galaxy Roman magnitude calculation using the bundled lightcone.
+one-galaxy Roman magnitude calculation using the bundled lightcone. Exact
+direct-dependency versions from one clean verification run are recorded in
+[docs/TESTED_ENVIRONMENT.md](docs/TESTED_ENVIRONMENT.md).
 
 ## Licence
 
