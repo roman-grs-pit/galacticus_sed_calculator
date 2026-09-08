@@ -125,13 +125,22 @@ the simulation catalog. `read_galacticus_galaxy` and the spectrum methods
 automatically recognize the standard Galacticus lightcone
 (`/Lightcone/Output1`) and fixed-time (`/Outputs/OutputN`) layouts.
 
-Runnable spectrum and dust examples are provided in:
+The notebook is a guided introduction to the main calculation. The Python
+scripts are shorter, task-specific examples that can be run directly or adapted
+for catalogue-processing workflows:
 
 - [examples/exampleUsage.ipynb](examples/exampleUsage.ipynb), a worked
   notebook covering spectra, template compatibility, dust attenuation, and
   Roman WFI magnitudes;
-- [examples/example_SEDs_for_lightcone.py](examples/example_SEDs_for_lightcone.py);
-- [examples/example_dust_attenuation.py](examples/example_dust_attenuation.py).
+- [examples/example_SEDs_for_lightcone.py](examples/example_SEDs_for_lightcone.py),
+  an end-to-end lightcone example suitable as a starting point for grism-image
+  inputs;
+- [examples/example_dust_attenuation.py](examples/example_dust_attenuation.py),
+  a comparison of emission-line and continuum attenuation;
+- [examples/example_fast_sed.py](examples/example_fast_sed.py), a comparison of
+  the adaptive and fixed-grid spectrum calculation paths;
+- [examples/example_profiling.py](examples/example_profiling.py), a short
+  catalogue-scale timing example.
 
 ## Dust Attenuation
 

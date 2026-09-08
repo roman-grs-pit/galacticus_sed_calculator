@@ -1,10 +1,7 @@
-"""
-Example profiling script matching the setup from the issue.
+"""Measure the cost of generating spectra for a short sequence of galaxies.
 
-This demonstrates the exact setup requested:
-1. Initialize SED calculator once
-2. Loop over galaxy indices
-3. Time the evaluate_total_spectrum calls
+The calculator is initialized once, as it would be for a catalogue-scale job,
+and the script reports per-galaxy and total execution times.
 """
 
 import numpy as np
@@ -65,11 +62,7 @@ print(f"Std dev: {np.std(times):.4f} s")
 print(f"Min time: {np.min(times):.4f} s")
 print(f"Max time: {np.max(times):.4f} s")
 print(f"\nTotal time for {num_galaxies_to_test} galaxies: {np.sum(times):.2f} s")
-print(f"\nProjected time for 10,000 galaxies: {np.mean(times) * 10000 / 60:.1f} minutes")
-print(f"Target time (0.2 s/galaxy): {0.2 * 10000 / 60:.1f} minutes")
-print(f"Performance ratio (current/target): {np.mean(times) / 0.2:.2f}x")
-
-if np.mean(times) < 0.2:
-    print(f"\n✓ FASTER than target by {(0.2 - np.mean(times)) / 0.2 * 100:.0f}%")
-else:
-    print(f"\n✗ SLOWER than target by {(np.mean(times) - 0.2) / 0.2 * 100:.0f}%")
+print(
+    f"\nProjected time for 10,000 galaxies: "
+    f"{np.mean(times) * 10000 / 60:.1f} minutes"
+)

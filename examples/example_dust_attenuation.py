@@ -1,9 +1,4 @@
-"""
-Example demonstrating dust attenuation for emission lines.
-
-This example shows how to apply dust attenuation when generating galaxy spectra
-using the GB10 (Garn & Best 2010) generalized model and Calzetti attenuation law.
-"""
+"""Compare emission-line and continuum dust attenuation for one galaxy."""
 import numpy as np
 import astropy.units as u
 from galacticus_sed_calculator import SEDCalculator
@@ -32,6 +27,14 @@ dust_params = {
     'attenuation_scatter': 0.0
 }
 
+# The continuum model is configured separately from the emission-line model.
+# This fixed A_V is illustrative rather than a universal choice.
+continuum_dust = {
+    'model': 'fixed_av',
+    'params': {'A_V': 1.0},
+    'law': 'calzetti',
+}
+
 # Select a galaxy to analyze
 galaxy_index = 0
 
@@ -57,9 +60,9 @@ spectrum_no_dust = calc.evaluate_component_spectrum(
     lineFWHM=50 * u.AA  # Wider lines for visualization
 )
 
-# Generate spectrum WITH dust attenuation
-print("Generating spectrum with dust attenuation (GB10 model)...")
-spectrum_with_dust = calc.evaluate_component_spectrum(
+# Generate a spectrum with emission-line attenuation only.
+print("Generating spectrum with emission-line attenuation...")
+spectrum_line_dust = calc.evaluate_component_spectrum(
     galacticus_file,
     galIndex=galaxy_index,
     component='disk',
@@ -73,17 +76,48 @@ spectrum_with_dust = calc.evaluate_component_spectrum(
     lineFWHM=50 * u.AA
 )
 
+# Add an independently configured attenuation model for the stellar continuum.
+print("Generating spectrum with emission-line and continuum attenuation...")
+spectrum_all_dust = calc.evaluate_component_spectrum(
+    galacticus_file,
+    galIndex=galaxy_index,
+    component='disk',
+    obs_wavelengths=obs_wavelengths,
+    include_emission_lines=True,
+    minimumLineWavelength=0.0 * u.micron,
+    maximumLineWavelength=10.0 * u.micron,
+    dust_model='gb10_generalised',
+    dust_params=dust_params,
+    dust_law='calzetti',
+    continuum_dust=continuum_dust,
+    lineFWHM=50 * u.AA,
+)
+
 # Extract flux arrays for plotting
 wavelengths_for_plot = np.linspace(8000, 30000, 2000) * u.AA
 flux_no_dust = spectrum_no_dust(wavelengths_for_plot, flux_unit='flam')
-flux_with_dust = spectrum_with_dust(wavelengths_for_plot, flux_unit='flam')
+flux_line_dust = spectrum_line_dust(wavelengths_for_plot, flux_unit='flam')
+flux_all_dust = spectrum_all_dust(wavelengths_for_plot, flux_unit='flam')
 
 # Plot the comparison
 plt.figure(figsize=(12, 6))
 
 plt.subplot(2, 1, 1)
 plt.plot(wavelengths_for_plot, flux_no_dust, label='No dust', alpha=0.7, linewidth=1)
-plt.plot(wavelengths_for_plot, flux_with_dust, label='With dust (GB10)', alpha=0.7, linewidth=1)
+plt.plot(
+    wavelengths_for_plot,
+    flux_line_dust,
+    label='Emission-line dust',
+    alpha=0.7,
+    linewidth=1,
+)
+plt.plot(
+    wavelengths_for_plot,
+    flux_all_dust,
+    label='Emission-line and continuum dust',
+    alpha=0.7,
+    linewidth=1,
+)
 plt.xlabel('Observed Wavelength (Å)')
 plt.ylabel('Flux (erg/s/cm²/Å)')
 plt.title(f'Galaxy Spectrum Comparison (z={galData["redshift"]:.3f})')
@@ -91,10 +125,23 @@ plt.legend()
 plt.grid(True, alpha=0.3)
 plt.yscale('log')
 
-# Plot the ratio (attenuation factor)
+# Plot the attenuation factors. Avoid division warnings at wavelengths where
+# both spectra have zero flux.
 plt.subplot(2, 1, 2)
-ratio = flux_no_dust / flux_with_dust
-plt.plot(wavelengths_for_plot, ratio, color='red', linewidth=1)
+line_ratio = np.divide(
+    flux_no_dust.value,
+    flux_line_dust.value,
+    out=np.full(flux_no_dust.shape, np.nan),
+    where=flux_line_dust.value > 0,
+)
+all_ratio = np.divide(
+    flux_no_dust.value,
+    flux_all_dust.value,
+    out=np.full(flux_no_dust.shape, np.nan),
+    where=flux_all_dust.value > 0,
+)
+plt.plot(wavelengths_for_plot, line_ratio, label='Emission-line dust')
+plt.plot(wavelengths_for_plot, all_ratio, label='Emission-line and continuum dust')
 plt.xlabel('Observed Wavelength (Å)')
 plt.ylabel('Flux Ratio (no dust / with dust)')
 plt.title('Dust Attenuation Effect')
@@ -115,4 +162,5 @@ print("  - delta_z: Redshift dependence")
 print("  - delta_M: Stellar mass dependence")
 print("  - delta_Mz: Mass-redshift coupling")
 print("  - attenuation_scatter: normal scatter in attenuation (mags)")
+print("  - continuum_dust: an independently configured continuum model")
 print("=" * 70)

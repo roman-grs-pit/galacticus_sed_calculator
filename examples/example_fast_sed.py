@@ -1,10 +1,5 @@
 #!/usr/bin/env python
-"""
-Example demonstrating the fast SED generation option.
-
-This script shows how to use the use_synphot=False option for faster
-SED generation when processing many galaxies.
-"""
+"""Compare the adaptive synphot and fixed-grid SED calculation paths."""
 
 import numpy as np
 import astropy.units as u
@@ -33,8 +28,9 @@ def main():
     print(f"Wavelength grid: {len(wavelengths)} points from {wavelengths.min()} to {wavelengths.max()}")
     print()
     
-    # Example 1: Using synphot (default, backward compatible)
-    print("Example 1: Using synphot (default behavior)")
+    # Example 1: synphot represents each line as a separate spectrum. Combining
+    # those spectra gives an adaptive waveset with extra sampling near the lines.
+    print("Example 1: Using the adaptive synphot path (default)")
     print("-" * 70)
     spectrum = calc.evaluate_component_spectrum(
         galacticus_file,
@@ -51,8 +47,9 @@ def main():
     print(f"Flux at 15000 Å: {flux_synphot[700]}")
     print()
     
-    # Example 2: Using fast path (no synphot)
-    print("Example 2: Using fast path (use_synphot=False)")
+    # Example 2: the fast path adds the continuum and every line directly on
+    # the supplied wavelength grid, then wraps the result as a SourceSpectrum.
+    print("Example 2: Using the fixed-grid fast path (use_synphot=False)")
     print("-" * 70)
     spectrum_fast = calc.evaluate_component_spectrum(
         galacticus_file,
@@ -60,7 +57,7 @@ def main():
         component='disk',
         obs_wavelengths=wavelengths,
         include_emission_lines=True,
-        use_synphot=False  # Enable fast path - uses numpy internally but still returns SourceSpectrum
+        use_synphot=False
     )
     print(f"Result type: {type(spectrum_fast)}")
     print(f"Spectrum has waveset: {hasattr(spectrum_fast, 'waveset')}")
@@ -80,24 +77,24 @@ def main():
     
     print(f"Maximum absolute difference: {max_diff:.2e} Lsun/(Hz Mpc^2)")
     print(f"Maximum relative difference: {relative_diff:.2e} ({relative_diff*100:.6f}%)")
-    print("✓ Results are numerically identical")
+    print("Results agree on the supplied wavelength grid")
     print()
     
     # Example 4: When to use each method
     print("Example 4: When to use each method")
     print("-" * 70)
     print("Use synphot (use_synphot=True) when:")
-    print("  • You need synphot SourceSpectrum objects for further processing")
-    print("  • You want synphot to handle wavelength grid optimization")
-    print("  • You're working with small numbers of galaxies")
+    print("  - You want adaptive sampling around individual emission lines")
+    print("  - You are working with a small number of galaxies")
+    print("  - The convenience of combining separate synphot spectra matters")
     print()
     print("Use fast path (use_synphot=False) when:")
-    print("  • Processing many galaxies (batch operations)")
-    print("  • You want faster computation (~2-4x speedup)")
-    print("  • Internal numpy operations are faster than synphot's spectrum handling")
-    print("  • Still returns SourceSpectrum for API consistency")
-    print("  • Performance is critical (~2.3x speedup)")
-    print("  • You control the wavelength grid (high enough to resolve lines)")
+    print("  - You are processing many galaxies")
+    print("  - You want faster computation (roughly 2-4x in current benchmarks)")
+    print("  - You want to control the wavelength grid")
+    print("    (ensure that it is fine enough to resolve the emission lines)")
+    print()
+    print("Both methods return a synphot SourceSpectrum object.")
     print()
     print("=" * 70)
 
