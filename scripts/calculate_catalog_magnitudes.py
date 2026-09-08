@@ -10,7 +10,7 @@ Galacticus file or to a separate output file.
 import numpy as np
 import h5py
 import astropy.units as u
-from astropy.cosmology import FlatLambdaCDM
+from astropy.cosmology import FlatLambdaCDM, LambdaCDM
 import time
 import shutil
 import os
@@ -44,7 +44,7 @@ DEFAULT_WAVELENGTH_NPOINTS = 2000
 _worker_state = {}
 
 
-def _init_worker(sed_template_file, filter_names, cosmology,
+def _init_worker(sed_template_file, filter_names, cosmology, magnitude_system,
                  dust_model=None, dust_params=None, dust_law='calzetti',
                  random_uniform_index=None, continuum_dust=None):
     """
@@ -62,6 +62,7 @@ def _init_worker(sed_template_file, filter_names, cosmology,
     bandpasses = {f: roman._get_synphot_bandpass(f) for f in filter_names}
     _worker_state['calc'] = calc
     _worker_state['bandpasses'] = bandpasses
+    _worker_state['magnitude_system'] = magnitude_system
     _worker_state['dust_model'] = dust_model
     _worker_state['dust_params'] = dust_params
     _worker_state['dust_law'] = dust_law
@@ -95,7 +96,8 @@ def _process_galaxy_worker(args):
             galIndex=i,
             bandpasses=_worker_state['bandpasses'],
             component=component,
-            obs_wavelengths=obs_wavelengths
+            obs_wavelengths=obs_wavelengths,
+            magnitude_system=_worker_state['magnitude_system'],
         )
         dust_model = _worker_state.get('dust_model')
         continuum_dust = _worker_state.get('continuum_dust')
@@ -111,6 +113,7 @@ def _process_galaxy_worker(args):
                 dust_law=_worker_state['dust_law'],
                 random_uniform_index=_worker_state.get('random_uniform_index'),
                 continuum_dust=continuum_dust,
+                magnitude_system=_worker_state['magnitude_system'],
             )
         return i, result
     except Exception as e:
@@ -496,6 +499,42 @@ def get_galaxy_count(filename):
     return n_galaxies
 
 
+def load_cosmology_from_catalog(galacticus_file):
+    """Construct an Astropy cosmology from Galacticus file metadata."""
+    group_path = '/Parameters/cosmologyParameters'
+    with h5py.File(galacticus_file, 'r') as handle:
+        if group_path not in handle:
+            raise ValueError(
+                f"Cosmology metadata not found at {group_path} in "
+                f"{galacticus_file}. Pass an Astropy cosmology explicitly."
+            )
+
+        attrs = handle[group_path].attrs
+        required = ('HubbleConstant', 'OmegaMatter')
+        missing = [name for name in required if name not in attrs]
+        if missing:
+            raise ValueError(
+                f"Cosmology metadata in {galacticus_file} is missing: "
+                f"{', '.join(missing)}"
+            )
+
+        kwargs = {
+            'H0': float(attrs['HubbleConstant']),
+            'Om0': float(attrs['OmegaMatter']),
+        }
+        if 'OmegaBaryon' in attrs:
+            kwargs['Ob0'] = float(attrs['OmegaBaryon'])
+        if 'temperatureCMB' in attrs:
+            kwargs['Tcmb0'] = float(attrs['temperatureCMB']) * u.K
+
+        if 'OmegaDarkEnergy' in attrs:
+            return LambdaCDM(
+                Ode0=float(attrs['OmegaDarkEnergy']),
+                **kwargs,
+            )
+        return FlatLambdaCDM(**kwargs)
+
+
 def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog, 
                                  bandpasses, output_file=None,
                                  max_galaxies=None, component='total',
@@ -503,7 +542,8 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                                  check_existing=True, obs_wavelengths=None,
                                  n_jobs=1, dust_model=None, dust_params=None,
                                  dust_law='calzetti', random_uniform_index=None,
-                                 continuum_dust=None):
+                                 continuum_dust=None, magnitude_system='AB',
+                                 cosmology=None):
     """
     Calculate magnitudes for all galaxies in a Galacticus catalog.
     
@@ -569,6 +609,11 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         attenuation. A scalar is interpreted as a fixed ``A_V`` using the
         Calzetti law. A dictionary can specify the model explicitly, e.g.
         ``{'model': 'fixed_av', 'params': {'A_V': 1.0}, 'law': 'calzetti'}``.
+    magnitude_system : {'AB', 'ST', 'Vega'}, optional
+        Magnitude system used for all calculated magnitudes. Default is 'AB'.
+    cosmology : astropy.cosmology.Cosmology, optional
+        Cosmology used to convert luminosities to observed fluxes. If omitted,
+        it is read from ``/Parameters/cosmologyParameters`` in the catalog.
     
     Returns
     -------
@@ -585,6 +630,9 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         - 'output_file': path to file where magnitudes were saved (if applicable)
         - 'format_type': detected format ('lightcone' or 'fixed-time')
         - 'base_path': base path used in the HDF5 file
+        - 'magnitude_system': magnitude system used for the calculation
+        - 'calculation_error_indices': galaxies whose calculation raised an exception
+        - 'cosmology': Astropy cosmology used for the calculation
         - 'dust_model': dust model name (only present when dust_model is specified)
         - 'dust_params': dust model parameters (only present when dust_model is specified)
         - 'dust_law': dust attenuation law (only present when dust_model is specified)
@@ -594,6 +642,34 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     format_type, base_path = detect_galacticus_format(galacticus_catalog)
     print(f"\nDetected format: {format_type}")
     print(f"Base path: {base_path}")
+
+    valid_magnitude_systems = {'AB', 'ST', 'Vega'}
+    if magnitude_system not in valid_magnitude_systems:
+        raise ValueError(
+            f"Invalid magnitude system {magnitude_system!r}; expected one of "
+            f"{sorted(valid_magnitude_systems)}."
+        )
+    if magnitude_system == 'Vega':
+        from synphot import SourceSpectrum
+
+        try:
+            SourceSpectrum.from_vega()
+        except Exception as exc:
+            raise RuntimeError(
+                "Could not load the Vega reference spectrum required for "
+                "Vega magnitudes."
+            ) from exc
+
+    n_galaxies_total = get_galaxy_count(galacticus_catalog)
+    if (
+        save_to_input
+        and max_galaxies is not None
+        and max_galaxies < n_galaxies_total
+    ):
+        raise ValueError(
+            "--max-galaxies cannot be used when saving magnitudes into a "
+            "full Galacticus catalog. Use --save-to-file for subset runs."
+        )
     
     # Determine the file to work with
     working_file = galacticus_catalog
@@ -642,16 +718,16 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     
     # Initialize the SED calculator
     print(f"\nInitializing SED calculator with template: {sed_template_file}")
-    # Use UNIT cosmology since the catalog was generated with it
-    unit_cosmo = FlatLambdaCDM(H0=67.74, Om0=0.3089)
-    calc = SEDCalculator(sed_template_file, cosmology=unit_cosmo)
+    if cosmology is None:
+        cosmology = load_cosmology_from_catalog(galacticus_catalog)
+    print(f"Using cosmology: {cosmology}")
+    calc = SEDCalculator(sed_template_file, cosmology=cosmology)
     
     # Set wavelength grid
     if obs_wavelengths is None:
         obs_wavelengths = np.linspace(4000, 23000, 2000) * u.AA
     
     # Get number of galaxies in catalog
-    n_galaxies_total = get_galaxy_count(working_file)
     print(f"Found {n_galaxies_total} galaxies in catalog")
     
     # Limit number of galaxies if requested
@@ -670,6 +746,7 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
     if has_dust:
         dust_magnitude_array = np.full((n_galaxies, n_filters), np.nan)
     redshifts = np.zeros(n_galaxies)
+    calculation_error_indices = []
     
     # Read redshifts for all galaxies
     print("\nReading galaxy redshifts...")
@@ -720,7 +797,8 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                     galIndex=i,
                     bandpasses=bandpasses,
                     component=component,
-                    obs_wavelengths=obs_wavelengths
+                    obs_wavelengths=obs_wavelengths,
+                    magnitude_system=magnitude_system,
                 )
 
                 # Store results in array
@@ -740,12 +818,14 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                         dust_law=dust_law,
                         random_uniform_index=random_uniform_index,
                         continuum_dust=continuum_dust,
+                        magnitude_system=magnitude_system,
                     )
                     for j, filter_name in enumerate(filter_names):
                         dust_magnitude_array[i, j] = dust_mags[filter_name]
 
             except Exception as e:
                 print(f"\nWarning: Failed to process galaxy {i}: {e}")
+                calculation_error_indices.append(i)
                 # magnitude_array already initialized with NaN values
     else:
         # Parallel path using multiprocessing.Pool
@@ -758,6 +838,7 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
             processes=actual_n_jobs,
             initializer=_init_worker,
             initargs=(sed_template_file, filter_names, cosmology,
+                      magnitude_system,
                       dust_model, dust_params, dust_law, random_uniform_index,
                       continuum_dust)
         ) as pool:
@@ -775,9 +856,24 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
                     if has_dust and 'dust_mags' in result:
                         for j, filter_name in enumerate(filter_names):
                             dust_magnitude_array[i, j] = result['dust_mags'][filter_name]
+                else:
+                    calculation_error_indices.append(i)
                 # If result is None the rows stay as NaN (already initialised)
     
     print("Done!")
+
+    if len(calculation_error_indices) == n_galaxies:
+        if save_to_input and copy_input and working_file != galacticus_catalog:
+            os.remove(working_file)
+        raise RuntimeError(
+            "Magnitude calculation failed for every galaxy; no output was "
+            "saved. Review the preceding warnings for the cause."
+        )
+    if calculation_error_indices:
+        print(
+            f"Warning: {len(calculation_error_indices)} of {n_galaxies} galaxies "
+            "could not be processed and remain NaN."
+        )
     
     elapsed_time = time.time() - start_time
     print(f"\nTotal time: {elapsed_time:.1f} seconds ({elapsed_time/n_galaxies:.2f} sec/galaxy)")
@@ -789,7 +885,12 @@ def calculate_catalog_magnitudes(sed_template_file, galacticus_catalog,
         'redshifts': redshifts,
         'galaxy_indices': np.arange(n_galaxies),
         'format_type': format_type,
-        'base_path': base_path
+        'base_path': base_path,
+        'magnitude_system': magnitude_system,
+        'calculation_error_indices': np.asarray(
+            calculation_error_indices, dtype=int
+        ),
+        'cosmology': cosmology,
     }
 
     # Add dust results if a dust model was specified
@@ -882,19 +983,20 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
     
     filter_names = results['filter_names']
     magnitude_array = results['magnitudes']
+    magnitude_system = results.get('magnitude_system', 'AB')
     n_galaxies = len(results['galaxy_indices'])
     
     # Determine comment based on component
     if component == 'total':
-        comment = "Total AB magnitude (disk + spheroid + AGN) including emission lines. Note there is currently no AGN continuum."
+        comment = f"Total {magnitude_system} magnitude (disk + spheroid + AGN) including emission lines. Note there is currently no AGN continuum."
     elif component == 'disk':
-        comment = "Disk AB magnitude including emission lines"
+        comment = f"Disk {magnitude_system} magnitude including emission lines"
     elif component == 'spheroid':
-        comment = "Spheroid AB magnitude including emission lines"
+        comment = f"Spheroid {magnitude_system} magnitude including emission lines"
     elif component == 'AGN':
-        comment = "AGN AB magnitude (emission lines only)"
+        comment = f"AGN {magnitude_system} magnitude (emission lines only)"
     else:
-        comment = f"{component} AB magnitude"
+        comment = f"{component} {magnitude_system} magnitude"
     
     with h5py.File(galacticus_file, 'a') as f:
         # Create or access the nodeData group
@@ -920,6 +1022,7 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
             # Add attributes
             dataset.attrs['comment'] = comment.encode('utf-8')
             dataset.attrs['filter'] = filter_name.encode('utf-8')
+            dataset.attrs['magnitude_system'] = magnitude_system
 
         # Save dust-attenuated data into a separate dustAttenuatedNodeData group
         if 'dust_magnitudes' in results or 'dust_emission_lines' in results:
@@ -927,6 +1030,11 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
             dust_comment = comment.replace(
                 "AB magnitude", "dust-attenuated AB magnitude"
             )
+            if magnitude_system != 'AB':
+                dust_comment = comment.replace(
+                    f"{magnitude_system} magnitude",
+                    f"dust-attenuated {magnitude_system} magnitude",
+                )
 
             # Create (or overwrite) the dustAttenuatedNodeData group
             if dust_group_path in f:
@@ -954,6 +1062,7 @@ def save_magnitudes_to_galacticus_file(galacticus_file, results, component='tota
                     )
                     ds.attrs['comment'] = dust_comment.encode('utf-8')
                     ds.attrs['filter'] = filter_name.encode('utf-8')
+                    ds.attrs['magnitude_system'] = magnitude_system
 
             # Dust-attenuated emission lines (same dataset names as dust-free)
             if 'dust_emission_lines' in results:
@@ -987,7 +1096,14 @@ def save_magnitude_catalog(results, output_file):
         
         # Save filter names as attributes
         f['magnitudes'].attrs['filter_names'] = results['filter_names']
-        f['magnitudes'].attrs['description'] = 'AB magnitudes for each galaxy in each filter'
+        magnitude_system = results.get('magnitude_system', 'AB')
+        f['magnitudes'].attrs['description'] = (
+            f'{magnitude_system} magnitudes for each galaxy in each filter'
+        )
+        f['magnitudes'].attrs['magnitude_system'] = magnitude_system
+        f['magnitudes'].attrs['n_calculation_errors'] = len(
+            results.get('calculation_error_indices', [])
+        )
         
         # Save redshifts
         f.create_dataset('redshifts', data=results['redshifts'],
@@ -996,6 +1112,22 @@ def save_magnitude_catalog(results, output_file):
         # Save galaxy indices
         f.create_dataset('galaxy_indices', data=results['galaxy_indices'],
                         compression='gzip', compression_opts=9)
+
+        calculation_error_indices = results.get('calculation_error_indices')
+        if calculation_error_indices is not None:
+            f.create_dataset(
+                'calculation_error_indices', data=calculation_error_indices
+            )
+
+        cosmology = results.get('cosmology')
+        if cosmology is not None:
+            group = f.create_group('cosmology')
+            group.attrs['HubbleConstant'] = cosmology.H0.value
+            group.attrs['OmegaMatter'] = cosmology.Om0
+            group.attrs['OmegaDarkEnergy'] = cosmology.Ode0
+            if cosmology.Ob0 is not None:
+                group.attrs['OmegaBaryon'] = cosmology.Ob0
+            group.attrs['temperatureCMB'] = cosmology.Tcmb0.value
     
     print(f"Saved magnitude catalog with shape {results['magnitudes'].shape}")
 
@@ -1049,6 +1181,18 @@ def parse_arguments():
     parser.add_argument('--magnitude-system', default='AB',
                        choices=['AB', 'ST', 'Vega'],
                        help='Magnitude system to use')
+
+    cosmology_group = parser.add_argument_group(
+        'cosmology override',
+        'By default, cosmology is read from the Galacticus catalog. To '
+        'override it, provide all three parameters.',
+    )
+    cosmology_group.add_argument('--hubble-constant', type=float,
+                                 help='H0 in km s^-1 Mpc^-1')
+    cosmology_group.add_argument('--omega-matter', type=float,
+                                 help='Present-day matter density parameter')
+    cosmology_group.add_argument('--omega-dark-energy', type=float,
+                                 help='Present-day dark-energy density parameter')
     
     # Dust attenuation options
     parser.add_argument('--dust-config', metavar='DUST_CONFIG',
@@ -1062,7 +1206,20 @@ def parse_arguments():
                             '(legacy dust_model/dust_params/dust_law configs are still supported) '
                             'and/or continuum_dust for continuum attenuation.')
     
-    return parser.parse_args()
+    args = parser.parse_args()
+    cosmology_values = (
+        args.hubble_constant,
+        args.omega_matter,
+        args.omega_dark_energy,
+    )
+    if any(value is not None for value in cosmology_values) and not all(
+        value is not None for value in cosmology_values
+    ):
+        parser.error(
+            '--hubble-constant, --omega-matter, and --omega-dark-energy '
+            'must be supplied together'
+        )
+    return args
 
 
 def main():
@@ -1118,6 +1275,15 @@ def main():
     # Create wavelength grid
     obs_wavelengths = np.linspace(args.wavelength_min, args.wavelength_max, 
                                    args.wavelength_npoints) * u.AA
+
+    cosmology = None
+    if args.hubble_constant is not None:
+        cosmology = LambdaCDM(
+            H0=args.hubble_constant,
+            Om0=args.omega_matter,
+            Ode0=args.omega_dark_energy,
+            Tcmb0=2.7255 * u.K,
+        )
     
     # Load bandpass filters
     print("\nLoading bandpass filters...")
@@ -1141,24 +1307,30 @@ def main():
     check_existing = not args.no_check_existing
 
     # Calculate magnitudes
-    results = calculate_catalog_magnitudes(
-        sed_template_file=args.sed_template,
-        galacticus_catalog=args.catalog,
-        bandpasses=bandpasses,
-        output_file=output_file,
-        max_galaxies=args.max_galaxies,
-        component=args.component,
-        save_to_input=save_to_input,
-        copy_input=copy_input,
-        check_existing=check_existing,
-        obs_wavelengths=obs_wavelengths,
-        n_jobs=args.n_jobs,
-        dust_model=dust_model,
-        dust_params=dust_params,
-        dust_law=dust_law,
-        random_uniform_index=random_uniform_index,
-        continuum_dust=continuum_dust,
-    )
+    try:
+        results = calculate_catalog_magnitudes(
+            sed_template_file=args.sed_template,
+            galacticus_catalog=args.catalog,
+            bandpasses=bandpasses,
+            output_file=output_file,
+            max_galaxies=args.max_galaxies,
+            component=args.component,
+            save_to_input=save_to_input,
+            copy_input=copy_input,
+            check_existing=check_existing,
+            obs_wavelengths=obs_wavelengths,
+            n_jobs=args.n_jobs,
+            dust_model=dust_model,
+            dust_params=dust_params,
+            dust_law=dust_law,
+            random_uniform_index=random_uniform_index,
+            continuum_dust=continuum_dust,
+            magnitude_system=args.magnitude_system,
+            cosmology=cosmology,
+        )
+    except (ValueError, RuntimeError) as exc:
+        print(f"\nError: {exc}", file=sys.stderr)
+        return 1
     
     if results is not None:
         print("\n" + "="*60)
@@ -1170,7 +1342,8 @@ def main():
         print(f"Filters: {', '.join(results['filter_names'])}")
     else:
         print("\nOperation cancelled or skipped.")
+    return 0
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
