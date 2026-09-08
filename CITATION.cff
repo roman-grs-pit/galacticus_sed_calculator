@@ -5,7 +5,7 @@ type: software
 authors:
   - family-names: Robertson
     given-names: Andrew
-    email: andrew.robertson@durham.ac.uk
+    email: andrew.a.robertson91@gmail.com
 abstract: >-
   Tools for calculating galaxy spectral energy distributions and broad-band
   magnitudes from star formation histories saved by Galacticus.

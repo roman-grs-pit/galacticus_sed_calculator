@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 license = "MIT"
 license-files = ["LICENSE"]
 authors = [
-    {name = "Andrew Robertson", email = "andrew.robertson@durham.ac.uk"}
+    {name = "Andrew Robertson", email = "andrew.a.robertson91@gmail.com"}
 ]
 keywords = ["astronomy", "galaxies", "spectroscopy", "galacticus"]
 classifiers = [
