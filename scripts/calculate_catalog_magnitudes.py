@@ -34,7 +34,6 @@ from galacticus_sed_calculator.dust_attenuation import (
 )
 
 # Default configuration
-DEFAULT_SED_TEMPLATE = "data/nodePropertyExtractorSED_fe2e8674cb07fa5849277ddb3df7fcdc_1.hdf5"
 DEFAULT_FILTERS = ["F062", "F087", "F106", "F129", "F158", "F184", "F213"]
 DEFAULT_WAVELENGTH_MIN = 4000  # Angstroms
 DEFAULT_WAVELENGTH_MAX = 24000  # Angstroms

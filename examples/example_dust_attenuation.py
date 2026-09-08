@@ -8,10 +8,12 @@ import numpy as np
 import astropy.units as u
 from galacticus_sed_calculator import SEDCalculator
 import matplotlib.pyplot as plt
+from pathlib import Path
 
 # Initialize the SED calculator with a template file
-sed_template_file = '../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-galacticus_file = '../data/romanUNIT.hdf5'
+repository_root = Path(__file__).resolve().parents[1]
+sed_template_file = repository_root / 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
+galacticus_file = repository_root / 'data/romanUNIT.hdf5'
 
 calc = SEDCalculator(sed_template_file)
 
@@ -99,8 +101,9 @@ plt.axhline(y=1, color='gray', linestyle='--', alpha=0.5, label='No attenuation'
 plt.legend()
 
 plt.tight_layout()
-plt.savefig('dust_attenuation_example.png', dpi=150)
-print("\nPlot saved as 'dust_attenuation_example.png'")
+output_path = Path(__file__).with_name('dust_attenuation_example.png')
+plt.savefig(output_path, dpi=150)
+print(f"\nPlot saved as '{output_path}'")
 
 print("\n" + "=" * 70)
 print("Example complete!")

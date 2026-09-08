@@ -18,17 +18,17 @@ The `scripts/calculate_catalog_coordinates.py` script converts Galacticus lightc
 Convert coordinates with default field center at north pole:
 
 ```bash
-python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5
+python scripts/calculate_catalog_coordinates.py data/romanUNIT.hdf5
 ```
 
-This creates a new file `data/galacticus_lightcone_with_coordinates.hdf5` with RA and Dec datasets added.
+This creates a new file `data/romanUNIT_with_coordinates.hdf5` with RA and Dec datasets added.
 
 ### Reposition Field Center
 
 Place the field center at a specific location on the sky:
 
 ```bash
-python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
+python scripts/calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
     --ra0 150.5 --dec0 30.2
 ```
 
@@ -37,7 +37,7 @@ python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
 Rotate the field by 45 degrees around the line of sight:
 
 ```bash
-python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
+python scripts/calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
     --ra0 150.5 --dec0 30.2 --roll 45
 ```
 
@@ -46,7 +46,7 @@ python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
 Save coordinates to a standalone file instead of modifying the catalog:
 
 ```bash
-python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
+python scripts/calculate_catalog_coordinates.py data/romanUNIT.hdf5 \
     --ra0 150 --dec0 30 \
     --save-to-file coordinates.hdf5
 ```
@@ -56,7 +56,7 @@ python scripts/calculate_catalog_coordinates.py data/galacticus_lightcone.hdf5 \
 You can also use the coordinate transformation directly in Python:
 
 ```python
-from calculate_catalog_coordinates import convert_lightcone_to_radec
+from scripts.calculate_catalog_coordinates import convert_lightcone_to_radec
 import numpy as np
 
 # Your lightcone angular coordinates (in RADIANS - Galacticus native format)
@@ -80,10 +80,10 @@ print(f"Dec: {dec}") # Output in degrees
 ### Process Entire Catalog
 
 ```python
-from calculate_catalog_coordinates import calculate_catalog_coordinates
+from scripts.calculate_catalog_coordinates import calculate_catalog_coordinates
 
 results = calculate_catalog_coordinates(
-    galacticus_catalog='data/galacticus_lightcone.hdf5',
+    galacticus_catalog='data/romanUNIT.hdf5',
     ra0=150.0,
     dec0=30.0,
     roll=0.0,
@@ -225,7 +225,7 @@ plt.show()
 Run the test suite:
 
 ```bash
-python -m unittest test_coordinates
+python -m pytest tests/test_coordinates.py
 ```
 
 All 15 tests should pass, covering:

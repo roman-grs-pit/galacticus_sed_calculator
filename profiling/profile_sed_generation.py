@@ -26,6 +26,17 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from galacticus_sed_calculator import SEDCalculator
 
 
+REPOSITORY_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_SED_TEMPLATE = os.path.join(
+    REPOSITORY_ROOT,
+    'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5',
+)
+DEFAULT_GALAXY_CATALOG = os.path.join(
+    REPOSITORY_ROOT,
+    'data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5',
+)
+
+
 def profile_sed_generation(
     sed_template_filename,
     galacticus_filename,
@@ -183,7 +194,7 @@ def profile_sed_generation(
         print(f"Max time: {results['stats']['max']:.4f} s")
         print(f"\nEstimated time for 10,000 galaxies: {results['stats']['mean'] * 10000 / 60:.1f} minutes")
         print(f"Target time (0.2 s/galaxy): {0.2 * 10000 / 60:.1f} minutes")
-        print(f"Current vs target: {results['stats']['mean'] / 0.2:.1f}x slower")
+        print(f"Mean / 0.2 s reference: {results['stats']['mean'] / 0.2:.2f}")
         
         if detailed_profile and 'detailed_profile_first_galaxy' in results:
             print("\n" + "=" * 80)
@@ -373,14 +384,14 @@ Examples:
     
     parser.add_argument(
         '--sed-template',
-        default='../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5',
-        help='Path to SED template file (default: ../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5)'
+        default=DEFAULT_SED_TEMPLATE,
+        help='Path to SED template file (default: bundled example template)'
     )
     
     parser.add_argument(
         '--galaxy-catalog',
-        default='../data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5',
-        help='Path to galaxy catalog file (default: ../data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5)'
+        default=DEFAULT_GALAXY_CATALOG,
+        help='Path to galaxy catalog file (default: bundled example catalog)'
     )
     
     parser.add_argument(

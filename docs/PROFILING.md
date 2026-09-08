@@ -44,7 +44,7 @@ python profiling/profile_sed_generation.py --num-galaxies 100 --output-file resu
 
 ### Example 1: Quick Performance Check
 
-Test the setup from the agent instructions:
+Run a short profiling check with the bundled example data:
 ```bash
 python profiling/profile_sed_generation.py --num-galaxies 10
 ```

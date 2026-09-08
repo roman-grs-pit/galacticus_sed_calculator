@@ -13,14 +13,16 @@ import astropy.units as u
 from astropy.cosmology import FlatLambdaCDM
 import matplotlib.pyplot as plt
 import numpy as np
+from pathlib import Path
 
 # import SEDfromSFH as sed - have changed structure of repository so this is now imported from galacticus_sed_calculator
 from galacticus_sed_calculator import SEDCalculator
 from galacticus_sed_calculator import read_dust_model_from_catalog
 
 # Initialize the SED calculator with a template file
-sed_template_file = '../data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
-galacticus_file = '../data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5'
+repository_root = Path(__file__).resolve().parents[1]
+sed_template_file = repository_root / 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
+galacticus_file = repository_root / 'data/romanUNIT-d1_4sqDeg_SFH_withMags_with_coordinates.hdf5'
 unit = FlatLambdaCDM(H0=67.74, Om0=0.3089)
 sedCalc = SEDCalculator(sed_template_file, cosmology=unit)
 
@@ -117,8 +119,9 @@ plt.axhline(y=1, color='gray', linestyle='--', alpha=0.5, label='No attenuation'
 plt.legend()
 
 plt.tight_layout()
-plt.savefig('dust_attenuation_example.png', dpi=150)
-print("\nPlot saved as 'dust_attenuation_example.png'")
+output_path = Path(__file__).with_name('dust_attenuation_example.png')
+plt.savefig(output_path, dpi=150)
+print(f"\nPlot saved as '{output_path}'")
 
 print("\n" + "=" * 70)
 print("Example complete!")
