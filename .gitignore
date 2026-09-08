@@ -8,6 +8,7 @@ __pycache__/
 
 # Generated example figures
 examples/dust_attenuation_example.png
+examples/sed_components_example.png
 
 # C extensions
 *.so

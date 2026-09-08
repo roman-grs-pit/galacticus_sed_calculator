@@ -127,8 +127,11 @@ automatically recognize the standard Galacticus lightcone
 
 Runnable spectrum and dust examples are provided in:
 
-- [examples/example_SEDs_for_lightcone.py](examples/example_SEDs_for_lightcone.py)
-- [examples/example_dust_attenuation.py](examples/example_dust_attenuation.py)
+- [examples/exampleUsage.ipynb](examples/exampleUsage.ipynb), a worked
+  notebook covering spectra, template compatibility, dust attenuation, and
+  Roman WFI magnitudes;
+- [examples/example_SEDs_for_lightcone.py](examples/example_SEDs_for_lightcone.py);
+- [examples/example_dust_attenuation.py](examples/example_dust_attenuation.py).
 
 ## Dust Attenuation
 

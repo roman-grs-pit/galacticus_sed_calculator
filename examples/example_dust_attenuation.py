@@ -9,25 +9,27 @@ import astropy.units as u
 from galacticus_sed_calculator import SEDCalculator
 import matplotlib.pyplot as plt
 from pathlib import Path
+from astropy.cosmology import LambdaCDM
 
 # Initialize the SED calculator with a template file
 repository_root = Path(__file__).resolve().parents[1]
 sed_template_file = repository_root / 'data/nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5'
 galacticus_file = repository_root / 'data/romanUNIT.hdf5'
 
-calc = SEDCalculator(sed_template_file)
+unit_cosmology = LambdaCDM(H0=67.74, Om0=0.3089, Ode0=0.6911)
+calc = SEDCalculator(sed_template_file, cosmology=unit_cosmology)
 
 # Define wavelength range for the spectrum
 obs_wavelengths = np.linspace(8000, 30000, 2000) * u.AA
 
-# Parameters for the GB10 dust attenuation model
-# These values are from the issue example
+# Example parameters for the GB10 dust attenuation model. Scatter is disabled
+# to make the result deterministic.
 dust_params = {
     'delta_0': 0.275,      # Constant offset term
     'delta_z': -1.614,     # Redshift coefficient
     'delta_M': -0.834,     # Stellar mass coefficient  
     'delta_Mz': -0.708,    # Mass-redshift coupling coefficient
-    'attenuation_scatter': 0.0  # No scatter for this example
+    'attenuation_scatter': 0.0
 }
 
 # Select a galaxy to analyze
@@ -112,5 +114,5 @@ print("  - delta_0: Constant offset")
 print("  - delta_z: Redshift dependence")
 print("  - delta_M: Stellar mass dependence")
 print("  - delta_Mz: Mass-redshift coupling")
-print("  - attenuation_scatter: Log-normal scatter (optional)")
+print("  - attenuation_scatter: normal scatter in attenuation (mags)")
 print("=" * 70)
