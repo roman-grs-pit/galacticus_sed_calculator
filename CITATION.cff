@@ -1,0 +1,21 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it using the metadata below."
+title: "Galacticus SED Calculator"
+type: software
+authors:
+  - family-names: Robertson
+    given-names: Andrew
+    email: andrew.robertson@durham.ac.uk
+abstract: >-
+  Tools for calculating galaxy spectral energy distributions and broad-band
+  magnitudes from star formation histories saved by Galacticus.
+repository-code: "https://github.com/roman-grs-pit/galacticus_sed_calculator"
+url: "https://github.com/roman-grs-pit/galacticus_sed_calculator"
+license: MIT
+version: 0.1.0
+keywords:
+  - astronomy
+  - galaxy formation
+  - Galacticus
+  - spectral energy distributions
+  - mock catalogs

@@ -24,8 +24,16 @@ Galaxy Redshift Survey mock catalogs.
 Users of these examples should cite Galacticus and the UNIT simulations as
 appropriate for their application:
 
-- Galacticus: <https://github.com/galacticusorg/galacticus>
-- UNIT simulations: <https://arxiv.org/abs/1811.02111>
+- Benson, A. J. (2012), "Galacticus: A semi-analytic model of galaxy
+  formation", *New Astronomy*, 17, 175-197,
+  <https://doi.org/10.1016/j.newast.2011.07.004>.
+- Chuang, C.-H. et al. (2019), "UNIT project: Universe N-body simulations for
+  the Investigation of Theoretical models from galaxy surveys", *Monthly
+  Notices of the Royal Astronomical Society*, 487, 48-59,
+  <https://doi.org/10.1093/mnras/stz1233>.
+
+The Galacticus source code is available at
+<https://github.com/galacticusorg/galacticus>.
 
 ## SED templates
 
@@ -59,5 +67,9 @@ were calculated from `COSMOSWeb_mastercatalog_v1.1.fits`; they do not contain th
 original object catalog. The accompanying JSON file records the source catalog,
 selection, survey area, columns, and binning used to construct them.
 
-When using these tables in scientific work, cite the corresponding
-COSMOS-Web/COSMOS2025 catalog release and publication.
+When using these tables in scientific work, cite Shuntov, M. et al. (2025),
+"COSMOS2025: The COSMOS-Web galaxy catalog of photometry, morphology,
+redshifts, and physical parameters from JWST, HST, and ground-based imaging",
+*Astronomy & Astrophysics*, 704, A339,
+<https://doi.org/10.1051/0004-6361/202555799>. The catalog and its documentation
+are available at <https://cosmos2025.iap.fr/>.

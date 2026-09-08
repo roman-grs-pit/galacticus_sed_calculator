@@ -1,5 +1,8 @@
 {
   "source": "COSMOS-Web/COSMOS2025 F150W",
+  "citation": "Shuntov et al. (2025), Astronomy & Astrophysics, 704, A339",
+  "doi": "10.1051/0004-6361/202555799",
+  "catalog_url": "https://cosmos2025.iap.fr/",
   "area_deg2": 0.54,
   "input_catalog": "COSMOSWeb_mastercatalog_v1.1.fits",
   "processed_catalog": "cosmos2025_f150w_catalog.csv",
