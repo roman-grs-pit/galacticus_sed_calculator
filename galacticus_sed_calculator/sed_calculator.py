@@ -676,6 +676,68 @@ class SEDCalculator:
 
     def calculate_rest_frame_sed(self, starFormationHistory):
         return calculate_sed_from_sfh_and_template(self.sedTemplate, starFormationHistory)
+
+    def calculate_diffuse_galaxy_seds(self, filename, galIndex, wavelength_micron,
+                                     diffuse_model, *, include_emission_lines=True,
+                                     inclination_degrees=None):
+        """Return separate diffuse-only disk/spheroid rest-frame luminosities.
+
+        ``diffuse_model`` is an already initialized galaxy adapter (initially
+        ``BensonGalaxyDust``). Keep its provider open across catalog rows.
+        Unitless wavelengths are microns; Quantity inputs are converted.
+
+        Returns a GalaxyDiffuseResult: stellar Lnu in Lsun/Hz and integrated
+        line luminosities in erg/s, with their intrinsic inputs, transmissions
+        and diagnostics. Only lines whose centers lie within the requested
+        wavelength range are included. Lines are not broadened or added into
+        continuum bins. No observed-frame flux or photometry is produced here.
+
+        This explicit diffuse-only API does NOT select the full clouds_diffuse
+        model: no birth clouds, local nebular screen, fixed-Av, GB10 or AGN are
+        applied. Existing spectrum and magnitude APIs are unchanged. Stellar
+        and nebular sources share the component's diffuse transfer.
+        """
+        from .galaxy_diffuse import ComponentLight, read_diffuse_galaxy_inputs
+
+        wave = (wavelength_micron.to_value(u.micron) if isinstance(wavelength_micron, u.Quantity)
+                else np.asarray(wavelength_micron, dtype=float))
+        if wave.ndim != 1 or wave.size == 0 or not np.all(np.isfinite(wave)) or np.any(wave <= 0):
+            raise ValueError("wavelength_micron must be a nonempty finite positive one-dimensional array")
+        self.validate_sfh_compatibility(filename)
+        galaxy = self.read_galacticus_galaxy(filename, galIndex)
+        _, base_path = self._file_formats[filename]
+        components = {}
+        with h5py.File(filename, 'r') as f:
+            inputs = read_diffuse_galaxy_inputs(f[f'{base_path}/nodeData'], galIndex,
+                                               inclination_degrees=inclination_degrees)
+            for component in ('disk', 'spheroid'):
+                sfh = galaxy[f'{component}SFH']
+                intrinsic = (self.calculate_rest_frame_sed(sfh) if sfh.size else np.zeros_like(self.sedWavelength))
+                # Resample only intrinsic light, then attenuate at the requested
+                # wavelengths. A template extending beyond 3 µm is legitimate;
+                # no out-of-domain dust transfer is invented for those bins.
+                stellar = resample_sed(self.sedWavelength, intrinsic, wave*1e4)
+                names, line_wave, lines = (), np.empty(0), np.empty(0)
+                if include_emission_lines:
+                    all_names, all_wave, paths = self._get_line_metadata(filename, component)
+                    all_wave_micron = all_wave / 1e4
+                    selected = (all_wave_micron >= wave.min()) & (all_wave_micron <= wave.max())
+                    names = tuple(all_names[selected])
+                    line_wave = all_wave_micron[selected]
+                    luminosities = []
+                    for path in paths[selected]:
+                        dataset = f[path]
+                        if 'unitsInSI' not in dataset.attrs:
+                            raise ValueError(f"Missing unitsInSI for emission-line luminosity: {path}")
+                        factor = float(dataset.attrs['unitsInSI'])
+                        if not np.isfinite(factor) or factor <= 0:
+                            raise ValueError(f"Invalid unitsInSI for emission-line luminosity: {path}")
+                        luminosities.append(dataset[galIndex] * factor / u.erg.to(u.J))
+                    lines = np.asarray(luminosities)
+                components[component] = ComponentLight(stellar, line_wave, lines, names)
+        result = diffuse_model.apply(wave, inputs, components)
+        result.diagnostics.update(galaxy_index=int(galIndex), redshift=float(galaxy['redshift']))
+        return result
     
     def calculate_observed_frame_sed(self, starFormationHistory, redshift, wavelengths, extrapolateWithZeros=False):
         # Note, deprecated, let's not think about "observed frame SEDs"!
