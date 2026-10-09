@@ -1,0 +1,94 @@
+{
+  "provenance": {
+    "adapter": "benson_disk_dust",
+    "schema_version": 1,
+    "parameters": {
+      "dust_to_metals_ratio": 0.334,
+      "cloud_fraction": 0.25,
+      "negative_metal_tolerance_msun": 0.0
+    },
+    "provider": {
+      "backend": "benson2018_rv4",
+      "schema_version": 1,
+      "filename": "compendium_exp_sech_Hernquist_hd0.137_hz0.137_dustD03Rv4.0_Attenuations.hdf5",
+      "sha256": "2a04540da7c3748279a9f1656bc891dfcd282249a87e0840a53a898c529ec051",
+      "source": "https://zenodo.org/records/6335545",
+      "doi": "10.5281/zenodo.6335545",
+      "reference": "https://arxiv.org/abs/1810.01449",
+      "license": "CC-BY-4.0",
+      "opacity_v_cm2_per_g_dust": 32062.2129019,
+      "target": "attenuation_magnitudes",
+      "coordinates": [
+        "log_wavelength",
+        "inclination_degrees",
+        "log_tau_v",
+        "log_scale_ratio"
+      ],
+      "low_tau_policy": "linear_transmission_to_unity",
+      "high_tau_policy": "error",
+      "scale_ratio_policy": "error",
+      "wavelength_policy": "error",
+      "endpoint_roundoff_rtol": 1e-07
+    },
+    "radius_convention": "exponential_disk_and_hernquist_scale_radii",
+    "input_units": {
+      "metal_mass": "Msun",
+      "scale_radius": "Mpc",
+      "wavelength": "micron"
+    },
+    "orientation": {
+      "random_uniform_column": 1,
+      "rule": "cos(i)=u",
+      "gb10_scatter_column": 0,
+      "reserved_position_angle_column": 2
+    },
+    "status_bits": {
+      "ignored_spheroid_metals": 1,
+      "disk_metals_sanitized": 2,
+      "spheroid_metals_sanitized": 4,
+      "low_optical_depth_blend": 8,
+      "optical_depth_clipped": 16,
+      "optical_depth_extrapolated": 32,
+      "scale_ratio_clipped": 64,
+      "wavelength_endpoint_roundoff": 128,
+      "extrapolation_positive_slope": 256
+    },
+    "composition": "diffuse_only_on_supplied_light; no implicit local or empirical attenuation"
+  },
+  "example_diagnostics": {
+    "inclination_degrees": 56.854327747813976,
+    "orientation_source": "randomUniform[:,1]",
+    "disk_optical_depth_v": 0.589823493021209,
+    "diffuse_disk_dust_mass_msun": 1391917.6919787624,
+    "ignored_spheroid_metal_mass_msun": 289.424099937935,
+    "ignored_spheroid_metal_fraction": 5.208422976960961e-05,
+    "spheroid_scale_ratio": 0.05372669064845559,
+    "original_inputs": {
+      "disk_metal_mass_msun": 5556557.65260983,
+      "spheroid_metal_mass_msun": 289.424099937935,
+      "disk_scale_radius_mpc": 0.001585823928717804,
+      "spheroid_scale_radius_mpc": 8.520107164113993e-05,
+      "orientation_uniform": 0.5467695591491295,
+      "inclination_degrees": null,
+      "catalog_units_in_si": {
+        "diskAbundancesGasMetals": 1.98892e+30,
+        "spheroidAbundancesGasMetals": 1.98892e+30,
+        "diskRadius": 3.08567758135e+22,
+        "spheroidRadius": 3.08567758135e+22
+      },
+      "catalog_profiles": {
+        "disk": "exponentialDisk",
+        "spheroid": "hernquist"
+      }
+    },
+    "disk_metal_mass_msun_used": 5556557.65260983,
+    "spheroid_metal_mass_msun_used": 289.424099937935,
+    "flags": [
+      "ignored_spheroid_metals"
+    ],
+    "status": 1,
+    "galaxy_index": 0,
+    "redshift": 1.4420058601499437
+  },
+  "peak_rss_before_plot_mib": 165.9375
+}
