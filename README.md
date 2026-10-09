@@ -170,6 +170,15 @@ Example configurations are in [data/dustModel](data/dustModel). The calibrated
 values in those files apply to the particular Galacticus model described there;
 they are not intended as universal dust parameters.
 
+A standalone [Benson diffuse-transfer provider](docs/BENSON_DIFFUSE.md) is also
+available for disk and spheroid light passing through disk-distributed dust.
+It interpolates attenuation in the checksum-verified external R_V=4 atlas and
+returns transmission plus diagnostics. See
+[example_benson_diffuse.py](examples/example_benson_diffuse.py) for evaluation,
+timing and lightweight interpolation checks. This is the first component of
+the planned `clouds_diffuse` model; it is not yet a selectable catalog/SED dust
+configuration.
+
 ## Other Catalog Tools
 
 The repository also includes scripts to:
