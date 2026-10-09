@@ -8,6 +8,60 @@ their source geometry matches. It does not yet connect to `SEDCalculator`,
 add a `clouds_diffuse` YAML option, or implement birth clouds or a
 galaxy-to-optical-depth conversion.
 
+## Visual guide
+
+These figures use the checksum-verified canonical atlas and the public provider
+API. They show **diffuse transmission**, not complete galaxy SEDs: there are no
+birth clouds, local nebular attenuation, dust re-emission, or galaxy-population
+weights. Wavelengths are rest-frame, not observed-frame Roman wavelengths.
+
+### Same dust, different light sources and viewing angles
+
+![Disk and spheroid transmission spectra at three inclinations](figures/benson_diffuse_spectra.png)
+
+At fixed central optical depth, the source distribution and inclination change
+the emerging spectrum. Here the compact spheroid is more attenuated than disk
+light; this is not a universal ordering for all spheroid sizes. The small
+excursions above unity are retained: transmission is directional, and scattering
+can redistribute light into a particular viewing direction. It is not a global
+photon-survival fraction restricted to [0, 1].
+
+### Varying optical depth and the source geometry
+
+![Optical transmission as inclination, optical depth and spheroid size vary](figures/benson_diffuse_geometry.png)
+
+All curves still have **dust in the disk**. Changing the spheroid scale ratio
+changes the distribution of the light sources, not the dust distribution.
+Extended spheroid sources behave quite differently from compact ones, including
+a different inclination dependence. The right panel approaches unity toward
+zero optical depth; its portion below 0.01 uses the explicit low-tau transmission
+blend. The wavelength 0.44 µm is a monochromatic illustration, not a synthetic
+B-band measurement. Ratios use scale radii, not half-light radii.
+
+### What interpolation actually does
+
+![Provider interpolation through native atlas nodes in wavelength and optical depth](figures/benson_diffuse_interpolation.png)
+
+Black points are read directly from the HDF5 transmission dataset and converted
+to attenuation. Blue curves are evaluated by the provider. Both horizontal
+axes are logarithmic and the vertical axes are attenuation in magnitudes, so
+the interpolation is piecewise linear on these plots. The other coordinates
+are fixed at native nodes. These are illustrations of the interpolation rule,
+not independent radiative-transfer validation or error estimates; small atlas
+features and Monte Carlo variation are not smoothed away.
+
+Reproduce all three figures from the repository root, with the package and
+`matplotlib` installed (`matplotlib` is included in the `diagnostics` extra):
+
+```bash
+PYTHONPATH=. python examples/plot_benson_diffuse.py /path/to/atlas.hdf5 \
+    --output-dir docs/figures
+```
+
+The script uses Matplotlib's non-interactive backend and needs no galaxy catalog
+or SSP templates. The derived plots credit the Benson/Zenodo atlas (CC BY 4.0);
+the external atlas itself is not bundled.
+
 ## External data
 
 Download the R_V=4 file from [Zenodo record 6335545](https://zenodo.org/records/6335545):
