@@ -58,6 +58,17 @@ The emission-line model parameters were calibrated against the Sobral et al.
 the comments in each file link to the relevant paper and repository discussion.
 They are examples rather than universal dust-model parameters.
 
+## External diffuse-dust atlas
+
+The standalone diffuse provider uses Benson's R_V=4 radiative-transfer atlas,
+available under CC BY 4.0 from [Zenodo record 6335545](https://zenodo.org/records/6335545),
+described in [Benson (2018)](https://arxiv.org/abs/1810.01449).
+Its SHA-256 is
+`2a04540da7c3748279a9f1656bc891dfcd282249a87e0840a53a898c529ec051`.
+The approximately 557 MiB HDF5 file is external: it is neither committed here
+nor included in package distributions. See [provider documentation](../docs/BENSON_DIFFUSE.md)
+for the filename, explicit download instructions, units and API.
+
 ## Observational diagnostic tables
 
 The repository also contains binned COSMOS-Web/COSMOS2025 F150W reference data
