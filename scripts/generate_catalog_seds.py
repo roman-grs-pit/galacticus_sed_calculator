@@ -569,9 +569,9 @@ _worker_state = None
 
 
 def _make_worker_state(template, cosmology, input_file, wavelength, component,
-                       include_lines, flux_unit, dust):
+                       include_lines, flux_unit, dust, dust_attenuated_only=False):
     return (SEDCalculator(template, cosmology=cosmology), input_file, wavelength,
-            component, include_lines, flux_unit, dust)
+            component, include_lines, flux_unit, dust, dust_attenuated_only)
 
 
 def _initialize_sed_worker(*args):
@@ -581,10 +581,10 @@ def _initialize_sed_worker(*args):
 
 def _calculate_batch(task, state):
     start, rows = task
-    calc, source, wavelength, component, lines, unit, dust = state
+    calc, source, wavelength, component, lines, unit, dust, dust_attenuated_only = state
     options = dict(component=component, include_emission_lines=lines,
                    flux_unit=unit, quiet=True, raise_errors=True)
-    free = _compute_sed_array(source, rows, wavelength, calc, **options)
+    free = None if dust_attenuated_only else _compute_sed_array(source, rows, wavelength, calc, **options)
     attenuated = None
     if dust is not None:
         attenuated = _compute_sed_array(source, rows, wavelength, calc, **options, **dust)
@@ -625,7 +625,7 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
                              sed_template_file, obs_wavelengths,
                              component='total', include_emission_lines=True,
                              cosmology=None, flux_unit='fnu', n_jobs=1,
-                             batch_size=32, return_array=True):
+                             batch_size=32, return_array=True, dust_attenuated_only=False):
     """Calculate and write contiguous batches with a single HDF5 writer.
 
     Each process initializes one calculator and reuses it. ``batch_size`` sets
@@ -636,6 +636,8 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
     Returns (dust-free array, wavelengths) for historical Python callers.
     Set return_array=False to return (None, wavelengths) without loading all
     spectra into memory; the command-line workflow always uses this mode.
+    With dust_attenuated_only=True, skip dust-free calculation and storage and
+    return (None, wavelengths). This requires catalog dust metadata.
     Worker exceptions propagate; sedGenerationComplete remains False on failure.
     """
     _validate_parallel_options(n_jobs, batch_size)
@@ -654,6 +656,8 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
         has_dust = dust_path in source
     # Invalid dust metadata must not silently produce a dust-free-only output.
     dust = read_dust_model_from_catalog(output_file, base_path=base_path) if has_dust else None
+    if dust_attenuated_only and dust is None:
+        raise ValueError('dust_attenuated_only requires catalog dust metadata')
     if dust is not None:
         dust = {key: dust.get(key) for key in (
             'dust_model', 'dust_params', 'dust_law', 'random_uniform_index', 'continuum_dust')}
@@ -661,14 +665,20 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
             raise ValueError('Dust scatter requires a stored random_uniform_index for reproducible batch generation')
     with h5py.File(output_file, 'a') as output:
         output[base_path].attrs['sedGenerationComplete'] = False
+        if dust_attenuated_only:
+            group = output[f'{base_path}/nodeData']
+            for name in ('observedSED', 'observedSEDWavelengths'):
+                if name in group:
+                    del group[name]
     shape = (len(selected_indices), len(wav_AA))
-    _write_sed_to_group(output_file, f'{base_path}/nodeData', wav_AA, None,
-                        component, include_emission_lines, flux_unit=flux_unit, shape=shape)
+    if not dust_attenuated_only:
+        _write_sed_to_group(output_file, f'{base_path}/nodeData', wav_AA, None,
+                            component, include_emission_lines, flux_unit=flux_unit, shape=shape)
     if dust is not None:
         _write_sed_to_group(output_file, dust_path, wav_AA, None, component,
                             include_emission_lines, flux_unit=flux_unit, shape=shape, **dust)
     initargs = (sed_template_file, cosmology, input_file, obs_wavelengths,
-                component, include_emission_lines, flux_unit, dust)
+                component, include_emission_lines, flux_unit, dust, dust_attenuated_only)
     tasks = ((start, selected_indices[start:start + batch_size])
              for start in range(0, len(selected_indices), batch_size))
     if n_jobs == 1:
@@ -679,19 +689,21 @@ def calculate_and_save_seds(input_file, output_file, selected_indices, base_path
     completed = 0
     try:
         with h5py.File(output_file, 'a') as output:
-            free_ds = output[f'{base_path}/nodeData/observedSED']
+            free_ds = None if dust_attenuated_only else output[f'{base_path}/nodeData/observedSED']
             dust_ds = output[f'{dust_path}/observedSED'] if dust is not None else None
             for start, free, attenuated in results:
-                stop = start + len(free)
-                free_ds[start:stop] = free
+                count = len(attenuated) if dust_attenuated_only else len(free)
+                stop = start + count
+                if free_ds is not None:
+                    free_ds[start:stop] = free
                 if dust_ds is not None:
                     dust_ds[start:stop] = attenuated
-                completed += len(free)
+                completed += count
                 print(f'Wrote {completed}/{len(selected_indices)} galaxy spectra', flush=True)
             output[base_path].attrs['sedGenerationComplete'] = True
     finally:
         results.close()
-    if return_array:
+    if return_array and not dust_attenuated_only:
         with h5py.File(output_file, 'r') as output:
             return output[f'{base_path}/nodeData/observedSED'][...], wav_AA
     return None, wav_AA
@@ -706,7 +718,8 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
                                component='total',
                                include_emission_lines=True,
                                cosmology=None,
-                               flux_unit='fnu', n_jobs=1, batch_size=32):
+                               flux_unit='fnu', n_jobs=1, batch_size=32,
+                               dust_attenuated_only=False):
     """
     Generate Galacticus catalog SEDs, optionally selecting a subset of galaxies.
 
@@ -755,6 +768,10 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
         :math:`f_\\nu` in erg/(s cm² Hz); ``'flam'`` stores
         :math:`f_\\lambda` in erg/(s cm² Å).
 
+    dust_attenuated_only : bool, optional
+        Calculate and store only dust-attenuated spectra (default False).
+        Requires dust metadata in the input catalog.
+
     Returns
     -------
     results : dict
@@ -785,6 +802,8 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
     dust_nd_path = f'{base_path}/dustAttenuatedNodeData'
     with h5py.File(galacticus_catalog, 'r') as f:
         has_dust = dust_nd_path in f
+    if dust_attenuated_only and not has_dust:
+        raise ValueError('dust_attenuated_only requires catalog dust metadata')
     if has_dust:
         print("Detected dustAttenuatedNodeData in input catalog - will compute "
               "dust-attenuated SEDs.")
@@ -839,6 +858,7 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
         cosmology=cosmology,
         flux_unit=flux_unit,
         n_jobs=n_jobs, batch_size=batch_size, return_array=False,
+        dust_attenuated_only=dust_attenuated_only,
     )
 
     return {
@@ -924,6 +944,9 @@ def parse_arguments():
                         help='Worker processes (default: 1).')
     parser.add_argument('--batch-size', type=int, default=32,
                         help='Galaxies per computation and HDF5 write batch (default: 32).')
+
+    parser.add_argument('--dust-attenuated-only', action='store_true',
+                        help='Calculate and store only dust-attenuated spectra; requires catalog dust metadata.')
 
     # Selection cuts
     cut_group = parser.add_argument_group('Selection cuts')
@@ -1042,6 +1065,7 @@ def main():
         include_emission_lines=not args.no_emission_lines,
         flux_unit=args.flux_unit,
         n_jobs=args.n_jobs, batch_size=args.batch_size,
+        dust_attenuated_only=args.dust_attenuated_only,
     )
 
     if results and results['n_selected'] > 0:

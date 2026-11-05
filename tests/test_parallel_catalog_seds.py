@@ -121,3 +121,47 @@ def test_cli_parallel_generation(name, tmp_path):
     with h5py.File(output) as f:
         assert f['Lightcone/Output1'].attrs['sedGenerationComplete']
         assert f['Lightcone/Output1/nodeData/observedSED'].shape == (5, 51)
+
+
+@pytest.mark.parametrize('jobs', [1, 2])
+def test_dust_only_matches_default(source, tmp_path, jobs):
+    wave = np.linspace(8000, 20000, 51)*u.AA
+    both = tmp_path/'both.hdf5'
+    only = tmp_path/'only.hdf5'
+    script.generate_catalog_seds(source, str(TEMPLATE), str(both),
+                                 obs_wavelengths=wave, batch_size=2)
+    script.generate_catalog_seds(source, str(TEMPLATE), str(only),
+                                 obs_wavelengths=wave, batch_size=2, n_jobs=jobs,
+                                 dust_attenuated_only=True)
+    with h5py.File(both) as a, h5py.File(only) as b:
+        base = 'Lightcone/Output1'
+        for name in ('observedSED', 'observedSEDWavelengths'):
+            assert name not in b[base+'/nodeData']
+        np.testing.assert_array_equal(
+            a[base+'/dustAttenuatedNodeData/observedSED'][...],
+            b[base+'/dustAttenuatedNodeData/observedSED'][...])
+        assert b[base].attrs['sedGenerationComplete']
+
+
+def test_dust_only_skips_free_calculation(monkeypatch):
+    calls = []
+    def compute(*args, **kwargs):
+        calls.append(kwargs)
+        return np.ones((2, 3))
+    monkeypatch.setattr(script, '_compute_sed_array', compute)
+    state = (None, 'source', None, 'total', True, 'flam',
+             {'dust_model': 'example'}, True)
+    start, free, dusty = script._calculate_batch((0, [0, 1]), state)
+    assert free is None
+    assert len(calls) == 1
+    assert calls[0]['dust_model'] == 'example'
+    assert dusty.shape == (2, 3)
+
+
+def test_dust_only_requires_metadata_before_copy(tmp_path):
+    output = tmp_path/'absent.hdf5'
+    with pytest.raises(ValueError, match='requires catalog dust metadata'):
+        script.generate_catalog_seds(str(ROOT/'data/romanUNIT.hdf5'),
+                                     str(TEMPLATE), str(output),
+                                     dust_attenuated_only=True)
+    assert not output.exists()

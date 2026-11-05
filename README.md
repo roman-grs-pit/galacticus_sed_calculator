@@ -213,7 +213,11 @@ filesystem throughput is limiting. When using multiple workers, set
 to limit numerical-library threads within each worker.
 
 The output contains `observedSED` and `observedSEDWavelengths` in `nodeData`,
-and also in `dustAttenuatedNodeData` when dust metadata are present. Dust scatter
+and also in `dustAttenuatedNodeData` when dust metadata are present. Add
+`--dust-attenuated-only` to calculate and store only the dust-attenuated spectra.
+This skips the extra dust-free calculation and spectral array, and requires
+dust metadata in the catalog. Galaxy properties are still copied to the output.
+Dust scatter
 uses the catalog's stored random-number index; nonzero scatter without that
 index is rejected so results do not depend on worker scheduling. The default
 cosmology remains `FlatLambdaCDM(H0=67.74, Om0=0.3089)`.
