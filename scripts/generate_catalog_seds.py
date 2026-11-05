@@ -1051,6 +1051,7 @@ def main():
         args.wavelength_min, args.wavelength_max, args.wavelength_npoints
     ) * u.AA
 
+    start_time = time.perf_counter()
     results = create_downsampled_catalog(
         galacticus_catalog=args.catalog,
         sed_template_file=args.sed_template,
@@ -1068,11 +1069,14 @@ def main():
         dust_attenuated_only=args.dust_attenuated_only,
     )
 
+    elapsed_seconds = time.perf_counter() - start_time
+
     if results and results['n_selected'] > 0:
         print('\n' + '=' * 60)
         print('DONE!')
         print('=' * 60)
         print(f"\nSelected galaxies: {results['n_selected']}")
+        print(f"Computation time:  {elapsed_seconds:.1f} seconds ({elapsed_seconds / 60:.2f} minutes)")
         print(f"Output file:       {results['output_file']}")
     else:
         print('\nNo galaxies selected; no output file was created.')
