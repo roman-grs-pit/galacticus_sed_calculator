@@ -33,6 +33,11 @@ python -m pip install -e .
 
 The current test suite is run on Python 3.10, 3.11, 3.12, and 3.13.
 
+The reader supports both legacy and modern Galacticus emission-line metadata,
+including the AGN extractor names `lmnstyEmssnLineAGN` and
+`luminosityEmissionLineAGN`, and HDF5 attributes stored as text or byte strings.
+Existing catalogs do not need to be converted.
+
 ## Quick Start
 
 The repository includes a five-galaxy Galacticus lightcone and a compatible SED

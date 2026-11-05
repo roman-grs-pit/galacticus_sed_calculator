@@ -155,27 +155,36 @@ galacticus_sed_config = {
 }
 
 def getLineNames(f, component='disk', verbose=False):
-    """ Get the emission line names for a given component from the Galacticus output file."""
-    if component=='AGN':
-        for key in f['/Parameters/nodePropertyExtractor'].attrs:
-            val = f['/Parameters/nodePropertyExtractor'].attrs[key]
-            if val == b'lmnstyEmssnLineAGN':
-                line_group = f'/Parameters/nodePropertyExtractor/' + key
-                if verbose:
-                    print(f'Found luminosityEmissionLine nodePropertyExtractor for {component}: {key}')
-    else:
-        for key in f['/Parameters/nodePropertyExtractor'].attrs:
-            val = f['/Parameters/nodePropertyExtractor'].attrs[key]
-            if val == b'luminosityEmissionLine':
-                line_group = f'/Parameters/nodePropertyExtractor/' + key
-                if f[line_group].attrs['component'] == component.encode('utf-8'):
-                    if verbose:
-                        print(f'Found luminosityEmissionLine nodePropertyExtractor for {component}: {key}')
-                    break
-        else:
-            raise ValueError("No 'luminosityEmissionLine' nodePropertyExtractor found.")
-    lineNames = f[line_group].attrs['lineNames']
-    return lineNames
+    """Read line names from either legacy or modern Galacticus metadata.
+
+    Accept both AGN extractor names and either text or byte-string HDF5
+    attributes. Return a one-dimensional array of UTF-8 bytes for compatibility
+    with the line-property readers, including catalogs with a single line.
+    """
+    def text(value):
+        return value.decode('utf-8') if isinstance(value, bytes) else str(value)
+
+    extractors = f['/Parameters/nodePropertyExtractor']
+    accepted = (
+        {'lmnstyEmssnLineAGN', 'luminosityEmissionLineAGN'}
+        if component == 'AGN' else {'luminosityEmissionLine'}
+    )
+    for key, value in extractors.attrs.items():
+        if text(value) not in accepted:
+            continue
+        group = extractors[key]
+        if component != 'AGN' and text(group.attrs.get('component', '')) != component:
+            continue
+        if verbose:
+            print(f'Found emission-line nodePropertyExtractor for {component}: {key}')
+        return np.asarray([
+            text(name).encode('utf-8')
+            for name in np.atleast_1d(group.attrs['lineNames'])
+        ])
+    raise ValueError(
+        f"No emission-line nodePropertyExtractor found for component {component!r}; "
+        f"expected one of {sorted(accepted)}."
+    )
 
 def getLineProperties(fname, component='disk', galIndex=None, hdf5_base_path=None):
     """
