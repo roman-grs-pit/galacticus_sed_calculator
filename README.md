@@ -184,6 +184,51 @@ timing and lightweight interpolation checks. This is the first component of
 the planned `clouds_diffuse` model; it is not yet a selectable catalog/SED dust
 configuration.
 
+## Generate catalog spectra
+
+`generate_catalog_seds.py` writes a new catalog containing galaxy properties
+and observed-frame spectra. With no selection cuts it processes every galaxy;
+optional redshift, magnitude and property cuts select a smaller sample.
+
+```bash
+python scripts/generate_catalog_seds.py \
+  input_catalog.hdf5 \
+  nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5 \
+  catalog_with_seds.hdf5 \
+  --n-jobs 8 --batch-size 32 \
+  --wavelength-min 4000 --wavelength-max 24000 \
+  --wavelength-npoints 10001 --flux-unit flam
+```
+
+`--n-jobs` sets worker processes (default 1); `--batch-size` sets galaxies per
+computation and output-write batch (default 32). Each worker initializes one
+calculator and reuses it. The parent writes each completed batch to its proper
+rows in HDF5, preserving catalog order. At most a bounded number of batches
+are in flight, so spectra are streamed rather than accumulated for the whole
+catalog. For the grid above, a batch of 32 dust-free and attenuated spectra
+contains approximately 5 MB of float64 values, in addition to each worker's
+template and caches. More workers are not necessarily faster if memory or
+filesystem throughput is limiting. When using multiple workers, set
+`OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1` in the environment
+to limit numerical-library threads within each worker.
+
+The output contains `observedSED` and `observedSEDWavelengths` in `nodeData`,
+and also in `dustAttenuatedNodeData` when dust metadata are present. Dust scatter
+uses the catalog's stored random-number index; nonzero scatter without that
+index is rejected so results do not depend on worker scheduling. The default
+cosmology remains `FlatLambdaCDM(H0=67.74, Om0=0.3089)`.
+
+For example, add `--redshift-min 0.5 --redshift-max 2 --magnitude-max 24
+--magnitude-filter F158` to select a subset. Magnitude cuts use the dust-free
+`nodeData` magnitudes. The input is read-only and existing output files are
+not overwritten. Failed computations raise an error; check the output group's
+`sedGenerationComplete` attribute before using an interrupted output. Choose a
+new output filename to retry. Spectra with physically undefined fluxes may
+still contain nonfinite values and should be checked for your application.
+
+The historical `create_downsampled_catalog.py` command remains available with
+the same arguments and now also accepts `--n-jobs` and `--batch-size`.
+
 ## Other Catalog Tools
 
 The repository also includes scripts to:
@@ -192,8 +237,8 @@ The repository also includes scripts to:
   `scripts/calculate_catalog_coordinates.py`;
 - add reproducible uniform random values for stochastic galaxy properties with
   `scripts/calculate_catalog_random_numbers.py`;
-- create smaller catalogs for tests and examples with
-  `scripts/create_downsampled_catalog.py`;
+- generate spectra with optional galaxy selection using
+  `scripts/generate_catalog_seds.py`;
 - generate diagnostic plots for Roman mock catalogs with
   `scripts/diagnostics/run_mock_catalog_diagnostics.py`.
 
