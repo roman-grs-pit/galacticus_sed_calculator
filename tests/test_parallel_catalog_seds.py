@@ -165,3 +165,40 @@ def test_dust_only_requires_metadata_before_copy(tmp_path):
                                      str(TEMPLATE), str(output),
                                      dust_attenuated_only=True)
     assert not output.exists()
+
+
+@pytest.mark.parametrize('dust_only', [False, True])
+def test_compact_and_full_outputs_agree(source, tmp_path, dust_only):
+    paths = []
+    with h5py.File(source) as f:
+        redshifts = f['Lightcone/Output1/nodeData/lightconeRedshiftObserved'][...]
+    minimum = float(np.median(redshifts))
+    expected_rows = np.flatnonzero(redshifts >= minimum)
+    for full in (False, True):
+        path = tmp_path/f'full_{full}.hdf5'
+        script.generate_catalog_seds(
+            source, str(TEMPLATE), str(path),
+            obs_wavelengths=np.linspace(8000, 20000, 51)*u.AA,
+            redshift_min=minimum, n_jobs=2, batch_size=2,
+            dust_attenuated_only=dust_only, copy_catalog_quantities=full)
+        paths.append(path)
+    with h5py.File(source) as src, h5py.File(paths[0]) as compact, h5py.File(paths[1]) as full:
+        base = 'Lightcone/Output1'
+        np.testing.assert_array_equal(compact[base+'/sourceRowIndices'][...], expected_rows)
+        allowed = {'nodeIndex', 'lightconeRedshiftObserved'}
+        if not dust_only:
+            allowed |= {'observedSED', 'observedSEDWavelengths'}
+        assert set(compact[base+'/nodeData']) <= allowed
+        for name in ('nodeIndex', 'lightconeRedshiftObserved'):
+            if name in src[base+'/nodeData']:
+                np.testing.assert_array_equal(compact[base+'/nodeData/'+name][...],
+                                              src[base+'/nodeData/'+name][expected_rows])
+        assert set(src[base+'/nodeData']) <= set(full[base+'/nodeData'])
+        for group in (['dustAttenuatedNodeData'] if dust_only else ['nodeData', 'dustAttenuatedNodeData']):
+            np.testing.assert_array_equal(compact[base+'/'+group+'/observedSED'][...],
+                                          full[base+'/'+group+'/observedSED'][...])
+        assert not compact[base].attrs['catalogQuantitiesCopied']
+        assert full[base].attrs['catalogQuantitiesCopied']
+        assert compact[base].attrs['sourceCatalog'] == source
+        assert compact[base].attrs['sedGenerationComplete']
+        assert compact[base+'/dustAttenuatedNodeData'].attrs['continuum_dust'] == src[base+'/dustAttenuatedNodeData'].attrs['continuum_dust']

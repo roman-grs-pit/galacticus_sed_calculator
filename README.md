@@ -186,8 +186,8 @@ configuration.
 
 ## Generate catalog spectra
 
-`generate_catalog_seds.py` writes a new catalog containing galaxy properties
-and observed-frame spectra. With no selection cuts it processes every galaxy;
+`generate_catalog_seds.py` writes observed-frame spectra, galaxy identifiers,
+source-row indices, observed redshifts where available, and metadata. With no selection cuts it processes every galaxy;
 optional redshift, magnitude and property cuts select a smaller sample.
 
 ```bash
@@ -216,11 +216,20 @@ The output contains `observedSED` and `observedSEDWavelengths` in `nodeData`,
 and also in `dustAttenuatedNodeData` when dust metadata are present. Add
 `--dust-attenuated-only` to calculate and store only the dust-attenuated spectra.
 This skips the extra dust-free calculation and spectral array, and requires
-dust metadata in the catalog. Galaxy properties are still copied to the output.
+dust metadata in the catalog.
 Dust scatter
 uses the catalog's stored random-number index; nonzero scatter without that
 index is rejected so results do not depend on worker scheduling. The default
 cosmology remains `FlatLambdaCDM(H0=67.74, Om0=0.3089)`.
+
+The default compact output keeps `nodeIndex` and `lightconeRedshiftObserved`
+when available, plus `sourceRowIndices` under the output group. These are zero-based
+row indices into the original catalog, whose path is stored as `sourceCatalog`.
+Model parameters, dust settings, the SED template path, and the calculation
+cosmology are also recorded. Other galaxy quantities can be retrieved from
+the source catalog using this row mapping. Add `--copy-catalog-quantities` to
+include all catalog quantities for the selected galaxies, including their
+star-formation histories, in the output file.
 
 For example, add `--redshift-min 0.5 --redshift-max 2 --magnitude-max 24
 --magnitude-filter F158` to select a subset. Magnitude cuts use the dust-free
@@ -231,7 +240,8 @@ new output filename to retry. Spectra with physically undefined fluxes may
 still contain nonfinite values and should be checked for your application.
 
 The historical `create_downsampled_catalog.py` command remains available with
-the same arguments and now also accepts `--n-jobs` and `--batch-size`.
+the same options and compact-output default. Add `--copy-catalog-quantities`
+to retain its historical full-catalog output.
 
 ## Other Catalog Tools
 

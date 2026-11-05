@@ -4,9 +4,9 @@ Generate Galacticus catalog SEDs, optionally selecting a subset of galaxies.
 
 This script applies user-defined selection cuts (e.g. redshift range, apparent
 magnitude limit, or any nodeData property) to a Galacticus HDF5 catalog.
-Galaxies that pass the cuts are copied — including all their data and metadata
-— to a new HDF5 file.  An observed-frame SED (flux-density spectrum) is then
-calculated for each selected galaxy and stored in the output file.
+The output contains observed-frame spectra, identifiers, source-row indices,
+observed redshifts where available, and metadata. Use --copy-catalog-quantities
+to include all catalog quantities for the selected galaxies.
 
 With no selection cuts all galaxies are included. Use --n-jobs for worker
 processes and --batch-size for galaxies per computation and HDF5 write batch.
@@ -32,7 +32,7 @@ Dust attenuation is handled automatically from the input catalog:
   dust-attenuated magnitudes and emission lines were already computed by
   ``calculate_catalog_magnitudes.py``), the script will:
 
-  1. Copy the sliced ``dustAttenuatedNodeData`` group to the output file.
+  1. Copy the ``dustAttenuatedNodeData`` metadata to the output file.
   2. Compute a dust-free SED → ``<base_path>/nodeData/observedSED``.
   3. Compute a dust-attenuated SED using the parameters stored in
      ``dustAttenuatedNodeData`` (read via
@@ -347,6 +347,45 @@ def copy_galaxy_data(input_file, output_file, selected_indices, base_path):
             # Large row maps exceed HDF5's compact attribute size limit.
             row_map = dst[base_path].create_dataset('sourceRowIndices', data=selected_indices)
             dst[base_path].attrs['selectedIndicesDataset'] = row_map.name
+
+
+
+def create_spectra_output(input_file, output_file, selected_indices, base_path):
+    """Create a compact output with source row mapping and catalog metadata."""
+    with h5py.File(input_file, 'r') as src, h5py.File(output_file, 'x') as dst:
+        if 'Parameters' in src:
+            src.copy('Parameters', dst)
+        current = ''
+        for part in base_path.strip('/').split('/'):
+            current += '/' + part
+            group = dst.require_group(current)
+            for key, value in src[current].attrs.items():
+                group.attrs[key] = value
+        base = dst[base_path]
+        base.attrs['sourceCatalog'] = os.path.abspath(input_file)
+        base.attrs['nSelectedGalaxies'] = len(selected_indices)
+        row_map = base.create_dataset('sourceRowIndices', data=selected_indices)
+        row_map.attrs['description'] = 'Zero-based row indices in the source catalog nodeData'
+        base.attrs['selectedIndicesDataset'] = row_map.name
+        source_nodes = src[f'{base_path}/nodeData']
+        nodes = base.create_group('nodeData')
+        # Identifiers and observed redshift are small and useful alongside spectra.
+        for name in ('nodeIndex', 'lightconeRedshiftObserved'):
+            if name not in source_nodes:
+                continue
+            source = source_nodes[name]
+            target = nodes.create_dataset(name, shape=(len(selected_indices), *source.shape[1:]),
+                                          dtype=source.dtype)
+            for start in range(0, len(selected_indices), 4096):
+                stop = min(start + 4096, len(selected_indices))
+                target[start:stop] = source[selected_indices[start:stop]]
+            for key, value in source.attrs.items():
+                target.attrs[key] = value
+        dust_path = f'{base_path}/dustAttenuatedNodeData'
+        if dust_path in src:
+            dust = dst.create_group(dust_path)
+            for key, value in src[dust_path].attrs.items():
+                dust.attrs[key] = value
 
 
 def _compute_sed_array(input_file, selected_indices, obs_wavelengths,
@@ -719,18 +758,17 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
                                include_emission_lines=True,
                                cosmology=None,
                                flux_unit='fnu', n_jobs=1, batch_size=32,
-                               dust_attenuated_only=False):
+                               dust_attenuated_only=False, copy_catalog_quantities=False):
     """
     Generate Galacticus catalog SEDs, optionally selecting a subset of galaxies.
 
-    Applies selection cuts to the input catalog, copies the matching galaxies
-    (including all their data and metadata) to a new HDF5 file, and then
-    calculates and stores an observed-frame SED for each selected galaxy.
+    Applies selection cuts and writes spectra, source row indices, identifiers,
+    observed redshifts where available, and metadata. Set copy_catalog_quantities
+    to also include all catalog quantities for the selected galaxies.
 
     Dust attenuation is handled automatically.  If the input catalog has a
-    ``dustAttenuatedNodeData`` group, its contents (sliced to the selected
-    galaxies) are copied to the output file and an additional dust-attenuated
-    SED is stored there.  The dust parameters are read from the catalog using
+    ``dustAttenuatedNodeData`` group, its metadata are copied to the output
+    file and an additional dust-attenuated SED is stored there.  The dust parameters are read from the catalog using
     :func:`~galacticus_sed_calculator.dust_attenuation.read_dust_model_from_catalog`.
 
     Parameters
@@ -768,6 +806,8 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
         :math:`f_\\nu` in erg/(s cm² Hz); ``'flam'`` stores
         :math:`f_\\lambda` in erg/(s cm² Å).
 
+    copy_catalog_quantities : bool, optional
+        Copy all catalog quantities for the selected galaxies (default False).
     dust_attenuated_only : bool, optional
         Calculate and store only dust-attenuated spectra (default False).
         Requires dust metadata in the input catalog.
@@ -840,11 +880,19 @@ def create_downsampled_catalog(galacticus_catalog, sed_template_file,
     # ------------------------------------------------------------------
     # Step 2: Copy galaxy data to output file
     # ------------------------------------------------------------------
-    print(f"\nCopying {n_selected} galaxies to {output_file}...")
-    copy_galaxy_data(
-        galacticus_catalog, output_file, selected_indices, base_path
-    )
-    print("Copy complete.")
+    if copy_catalog_quantities:
+        print(f"\nCopying {n_selected} galaxies to {output_file}...")
+        copy_galaxy_data(galacticus_catalog, output_file, selected_indices, base_path)
+        print("Copy complete.")
+    else:
+        print(f"\nPreparing spectra output for {n_selected} galaxies...")
+        create_spectra_output(galacticus_catalog, output_file, selected_indices, base_path)
+    with h5py.File(output_file, 'a') as output:
+        metadata = output[base_path].attrs
+        metadata['sourceCatalog'] = os.path.abspath(galacticus_catalog)
+        metadata['sedTemplateFile'] = os.path.abspath(sed_template_file)
+        metadata['catalogQuantitiesCopied'] = copy_catalog_quantities
+        metadata['sedCosmology'] = repr(cosmology)
 
     # ------------------------------------------------------------------
     # Step 3: Calculate and save SEDs
@@ -919,9 +967,8 @@ def parse_arguments():
     parser = argparse.ArgumentParser(
         description=(
             'Generate Galacticus catalog SEDs, optionally selecting a subset of galaxies.\n\n'
-            'Applies selection cuts to a Galacticus catalog, copies the '
-            'matching galaxies to a new HDF5 file, and calculates an '
-            'observed-frame SED for each one.'
+            'Writes observed-frame spectra, identifiers, source-row indices and metadata. '
+            'Use --copy-catalog-quantities to include all selected galaxy quantities.'
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -947,6 +994,9 @@ def parse_arguments():
 
     parser.add_argument('--dust-attenuated-only', action='store_true',
                         help='Calculate and store only dust-attenuated spectra; requires catalog dust metadata.')
+
+    parser.add_argument('--copy-catalog-quantities', action='store_true',
+                        help='Include all catalog quantities for the selected galaxies in the output.')
 
     # Selection cuts
     cut_group = parser.add_argument_group('Selection cuts')
@@ -1067,6 +1117,7 @@ def main():
         flux_unit=args.flux_unit,
         n_jobs=args.n_jobs, batch_size=args.batch_size,
         dust_attenuated_only=args.dust_attenuated_only,
+        copy_catalog_quantities=args.copy_catalog_quantities,
     )
 
     elapsed_seconds = time.perf_counter() - start_time
