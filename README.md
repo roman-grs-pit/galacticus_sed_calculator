@@ -33,6 +33,11 @@ python -m pip install -e .
 
 The current test suite is run on Python 3.10, 3.11, 3.12, and 3.13.
 
+The reader supports both legacy and modern Galacticus emission-line metadata,
+including the AGN extractor names `lmnstyEmssnLineAGN` and
+`luminosityEmissionLineAGN`, and HDF5 attributes stored as text or byte strings.
+Existing catalogs do not need to be converted.
+
 ## Quick Start
 
 The repository includes a five-galaxy Galacticus lightcone and a compatible SED
@@ -184,6 +189,65 @@ rest-frame SED API, including gas-metal/size-to-optical-depth conversion,
 deterministic orientation, separate disk/spheroid continua and line luminosities,
 and per-galaxy diagnostics. Existing spectrum/magnitude APIs are unchanged.
 
+## Generate catalog spectra
+
+`generate_catalog_seds.py` writes observed-frame spectra, galaxy identifiers,
+source-row indices, observed redshifts where available, and metadata. With no selection cuts it processes every galaxy;
+optional redshift, magnitude and property cuts select a smaller sample.
+
+```bash
+python scripts/generate_catalog_seds.py \
+  input_catalog.hdf5 \
+  nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5 \
+  catalog_with_seds.hdf5 \
+  --n-jobs 8 --batch-size 32 \
+  --wavelength-min 4000 --wavelength-max 24000 \
+  --wavelength-npoints 10001 --flux-unit flam
+```
+
+`--n-jobs` sets worker processes (default 1); `--batch-size` sets galaxies per
+computation and output-write batch (default 32). Each worker initializes one
+calculator and reuses it. The parent writes each completed batch to its proper
+rows in HDF5, preserving catalog order. At most a bounded number of batches
+are in flight, so spectra are streamed rather than accumulated for the whole
+catalog. For the grid above, a batch of 32 dust-free and attenuated spectra
+contains approximately 5 MB of float64 values, in addition to each worker's
+template and caches. More workers are not necessarily faster if memory or
+filesystem throughput is limiting. When using multiple workers, set
+`OMP_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 MKL_NUM_THREADS=1` in the environment
+to limit numerical-library threads within each worker.
+
+The output contains `observedSED` and `observedSEDWavelengths` in `nodeData`,
+and also in `dustAttenuatedNodeData` when dust metadata are present. Add
+`--dust-attenuated-only` to calculate and store only the dust-attenuated spectra.
+This skips the extra dust-free calculation and spectral array, and requires
+dust metadata in the catalog.
+Dust scatter
+uses the catalog's stored random-number index; nonzero scatter without that
+index is rejected so results do not depend on worker scheduling. The default
+cosmology remains `FlatLambdaCDM(H0=67.74, Om0=0.3089)`.
+
+The default compact output keeps `nodeIndex` and `lightconeRedshiftObserved`
+when available, plus `sourceRowIndices` under the output group. These are zero-based
+row indices into the original catalog, whose path is stored as `sourceCatalog`.
+Model parameters, dust settings, the SED template path, and the calculation
+cosmology are also recorded. Other galaxy quantities can be retrieved from
+the source catalog using this row mapping. Add `--copy-catalog-quantities` to
+include all catalog quantities for the selected galaxies, including their
+star-formation histories, in the output file.
+
+For example, add `--redshift-min 0.5 --redshift-max 2 --magnitude-max 24
+--magnitude-filter F158` to select a subset. Magnitude cuts use the dust-free
+`nodeData` magnitudes. The input is read-only and existing output files are
+not overwritten. Failed computations raise an error; check the output group's
+`sedGenerationComplete` attribute before using an interrupted output. Choose a
+new output filename to retry. Spectra with physically undefined fluxes may
+still contain nonfinite values and should be checked for your application.
+
+The historical `create_downsampled_catalog.py` command remains available with
+the same options and compact-output default. Add `--copy-catalog-quantities`
+to retain its historical full-catalog output.
+
 ## Other Catalog Tools
 
 The repository also includes scripts to:
@@ -192,8 +256,8 @@ The repository also includes scripts to:
   `scripts/calculate_catalog_coordinates.py`;
 - add reproducible uniform random values for stochastic galaxy properties with
   `scripts/calculate_catalog_random_numbers.py`;
-- create smaller catalogs for tests and examples with
-  `scripts/create_downsampled_catalog.py`;
+- generate spectra with optional galaxy selection using
+  `scripts/generate_catalog_seds.py`;
 - generate diagnostic plots for Roman mock catalogs with
   `scripts/diagnostics/run_mock_catalog_diagnostics.py`.
 
