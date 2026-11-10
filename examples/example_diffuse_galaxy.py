@@ -6,6 +6,7 @@ matplotlib. Sampling is deterministic and unweighted, not a population study.
 
 import argparse
 from collections import Counter
+import hashlib
 import json
 from pathlib import Path
 import resource
@@ -13,6 +14,7 @@ import sys
 import time
 
 import h5py
+import astropy.units as u
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -20,8 +22,47 @@ import numpy as np
 
 from galacticus_sed_calculator import SEDCalculator
 from galacticus_sed_calculator.diffuse_dust import Benson2018DiffuseProvider, verify_benson_atlas
-from galacticus_sed_calculator.galaxy_diffuse import BensonGalaxyDust, DiffuseDustParameters
+from galacticus_sed_calculator.galaxy_diffuse import (
+    BensonGalaxyDust, DiffuseDustParameters, galacticus_units_in_si,
+)
 from galacticus_sed_calculator.sed_calculator import detect_galacticus_format
+
+
+def input_fingerprint(filename):
+    digest = hashlib.sha256()
+    with open(filename, 'rb') as stream:
+        for block in iter(lambda: stream.read(1024*1024), b''):
+            digest.update(block)
+    return {'filename': Path(filename).name, 'size_bytes': Path(filename).stat().st_size,
+            'sha256': digest.hexdigest()}
+
+
+def audit_metal_columns(filename):
+    """Read-only full-column audit, in physical Msun; not a tolerance policy."""
+    _, base = detect_galacticus_format(filename)
+    report = {}
+    with h5py.File(filename) as f:
+        node = f[base+'/nodeData']
+        for source in ('disk', 'spheroid'):
+            dataset = node[source+'AbundancesGasMetals']
+            masses = dataset[:] * (galacticus_units_in_si(dataset)/u.Msun.to(u.kg))
+            finite = np.isfinite(masses)
+            negative = finite & (masses < 0)
+            absolute = -masses[negative]
+            worst = int(np.argmin(np.where(finite, masses, np.inf))) if np.any(finite) else None
+            report[source] = {
+                'rows': len(masses), 'negative': int(negative.sum()), 'nonfinite': int((~finite).sum()),
+                'minimum_msun': float(masses[worst]) if worst is not None else None,
+                'most_negative_row': worst if absolute.size else None,
+                'most_negative_node_index': int(node['nodeIndex'][worst]) if absolute.size and 'nodeIndex' in node else None,
+                'negative_absolute_msun_percentiles': {
+                    str(p): float(np.percentile(absolute, p)) if absolute.size else None for p in (0, 50, 90, 99, 100)
+                },
+                'negative_count_abs_at_most_msun': {
+                    str(t): int(np.count_nonzero(absolute <= t)) for t in (1e-6, 1e-3, 1., 100., 10000.)
+                },
+            }
+    return report
 
 
 def plot_result(result, output):
@@ -66,6 +107,8 @@ def main():
     parser.add_argument('--sample-size', type=int, default=0,
                         help='Also evaluate evenly spaced catalog rows; report failures, never silently sanitize')
     parser.add_argument('--negative-metal-tolerance-msun', type=float, default=0.)
+    parser.add_argument('--audit-metal-columns', action='store_true',
+                        help='Audit both full metal columns and fingerprint input files (outside the timed sample)')
     parser.add_argument('--output-dir', type=Path, required=True)
     args = parser.parse_args()
     if args.sample_size < 0:
@@ -99,6 +142,10 @@ def main():
                                 'sampling': 'evenly spaced row indices; unweighted; one warm process'}
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     report['peak_rss_before_plot_mib'] = peak/(1024**2 if sys.platform == 'darwin' else 1024)
+    if args.audit_metal_columns:
+        report['inputs'] = {name: input_fingerprint(path) for name, path in
+                            (('catalog', args.catalog), ('template', args.template))}
+        report['metal_column_audit'] = audit_metal_columns(args.catalog)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     plot_result(result, args.output_dir)
     with (args.output_dir/'benson_diffuse_galaxy.json').open('w') as stream:

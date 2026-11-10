@@ -16,7 +16,7 @@ from galacticus_sed_calculator import SEDCalculator
 from galacticus_sed_calculator.diffuse_dust import Benson2018DiffuseProvider
 from galacticus_sed_calculator.galaxy_diffuse import (
     BensonGalaxyDust, ComponentLight, DiffuseDustParameters, DiffuseGalaxyInputs,
-    DiffuseStatus, read_diffuse_galaxy_inputs,
+    DiffuseStatus, galacticus_units_in_si, read_diffuse_galaxy_inputs,
 )
 from test_diffuse_dust import atlas  # Reuse the small, checksum-verified analytic atlas fixture.
 
@@ -282,5 +282,51 @@ def test_line_units_and_exact_line_center_range(model, tmp_path):
                                original.components['disk'].line_luminosity)
     with h5py.File(catalog, 'r+') as f:
         del f['Lightcone/Output1/nodeData/luminosityEmissionLineDisk:balmerAlpha6565'].attrs['unitsInSI']
-    with pytest.raises(ValueError, match='Missing unitsInSI for emission-line'):
+    with pytest.raises(ValueError, match='Missing unitsInSI'):
         calc.calculate_diffuse_galaxy_seds(catalog, 0, [0.6565], model)
+
+
+def structured_units(factor, comoving=0):
+    return np.array((factor, b'unit', b'unit', comoving),
+                    dtype=[('unitsInSI', 'f8'), ('description', 'S32'),
+                           ('quantity', 'S32'), ('isComoving', 'i4')])
+
+
+def test_structured_units_equivalent_through_sed_api(model, tmp_path):
+    catalog = tmp_path/'modern_units.hdf5'
+    with h5py.File(DATA/'romanUNIT.hdf5') as src, h5py.File(catalog, 'w') as dst:
+        for key in ('Parameters', 'Lightcone'):
+            src.copy(key, dst)
+    calc = SEDCalculator(TEMPLATE)
+    reference = calc.calculate_diffuse_galaxy_seds(catalog, 0, [0.3, 0.6565, 1.], model)
+    with h5py.File(catalog, 'r+') as f:
+        for dataset in f['Lightcone/Output1/nodeData'].values():
+            if 'unitsInSI' in dataset.attrs:
+                dataset.attrs['units'] = structured_units(dataset.attrs['unitsInSI'])
+                del dataset.attrs['unitsInSI']
+    modern = calc.calculate_diffuse_galaxy_seds(catalog, 0, [0.3, 0.6565, 1.], model)
+    assert modern.diagnostics == reference.diagnostics
+    for name in reference.components:
+        np.testing.assert_array_equal(modern.components[name].stellar_lnu, reference.components[name].stellar_lnu)
+        np.testing.assert_array_equal(modern.components[name].line_luminosity, reference.components[name].line_luminosity)
+
+
+@pytest.mark.parametrize('case,match', [('missing', 'Missing unitsInSI'), ('malformed', 'Malformed'),
+                                      ('comoving', 'Comoving'), ('negative', 'positive'),
+                                      ('nonfinite', 'finite'), ('conflict', 'Conflicting'),
+                                      ('no_comoving', 'Missing isComoving')])
+def test_bad_unit_metadata(tmp_path, case, match):
+    with h5py.File(tmp_path/'units.hdf5', 'w') as f:
+        f['x'] = [1.]
+        ds = f['x']
+        if case == 'malformed':
+            ds.attrs['units'] = 'Msun'
+        elif case == 'no_comoving':
+            ds.attrs['units'] = np.array((1.,), dtype=[('unitsInSI', 'f8')])
+        elif case != 'missing':
+            ds.attrs['units'] = structured_units(-1 if case == 'negative' else np.nan if case == 'nonfinite' else 1,
+                                                 int(case == 'comoving'))
+        if case == 'conflict':
+            ds.attrs['unitsInSI'] = 2.
+        with pytest.raises(ValueError, match=match):
+            galacticus_units_in_si(ds)

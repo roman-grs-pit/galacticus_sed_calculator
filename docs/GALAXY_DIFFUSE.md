@@ -90,10 +90,13 @@ carry matching comments and declare `exponentialDisk`/`hernquist` profiles in
 
 `read_diffuse_galaxy_inputs(node_data, index)` reads standard field names
 `diskAbundancesGasMetals`, `spheroidAbundancesGasMetals`, `diskRadius` and
-`spheroidRadius`. It honors their `unitsInSI` metadata, including the slightly
+`spheroidRadius`. It honors either legacy `unitsInSI` metadata or the modern
+scalar compound `units` attribute's `unitsInSI` field, including the slightly
 different solar-mass constant used by older Galacticus outputs. Missing unit
 metadata raises instead of guessing. Line luminosities similarly use their
-`unitsInSI` conversion to erg/s. Stellar Lnu retains the existing SED-kernel
+unit conversion to erg/s. Modern comoving quantities, malformed records and
+conflicting legacy/modern conversion factors raise rather than being guessed.
+Stellar Lnu retains the existing SED-kernel
 normalization.
 
 Known incompatible profile declarations are rejected when relevant. Where
@@ -179,7 +182,14 @@ BENSON2018_ATLAS=/path/to/atlas.hdf5 python -m pytest -q
 ```
 
 The example writes a figure plus a JSON diagnostic report. With strict defaults,
-the five bundled rows all succeed. A development smoke test on 256 evenly
+the five bundled rows all succeed. Add `--audit-metal-columns` to scan both
+full gas-metal columns and fingerprint the input catalog/template; this work
+is outside the timed sample. The reader supports modern emission-line metadata
+via the upstream compatibility update merged into this branch.
+
+### Historical test: original Calibration1 catalog
+
+A development smoke test on 256 evenly
 spaced rows from the 96,424-row
 `GP-MCMC-Calibration1_allUNIT_16sqDegMock_XMM-LSS` catalog gave **198 successes
 and 58 rejections**, all rejections due to negative gas-metal masses. Of the
@@ -198,3 +208,50 @@ negative spheroid gas-metal entries, including both tiny residuals and very
 large nonphysical values. This adapter does not repair the catalog or diagnose
 the upstream Galacticus cause. Production treatment needs a deliberate input
 quality policy, not an indiscriminate zeroing of all negative masses.
+
+### Updated test: Calibration1-Fixes1 (2026-11-10)
+
+The replacement release is
+`GP-MCMC-Calibration1-Fixes1_allUNIT_16sqDegMock_XMM-LSS`. We tested its
+`galaxyCatalogs/romanUNIT-d1_25_16sqDeg.hdf5` (96,423 rows), with the
+`nodePropertyExtractorSED_Nt50_NZ11_ageMinimum0.001.hdf5` in the same release
+directory. SFH/template compatibility validation passed. This is one local
+catalog file, not an audit of the whole 400-file release.
+
+The same 256 evenly spaced row-index protocol, 369 wavelengths over 0.12–2 µm,
+stellar plus nebular light, and **unchanged zero negative-metal tolerance** gave:
+
+| Result | Original catalog (historical) | Fixes1 catalog |
+| --- | ---: | ---: |
+| Successful evaluations | 198 | 203 |
+| Rejected negative-metal inputs | 58 | 53 |
+| Ignored-spheroid-metals flags among successes | 171 | 175 |
+| Low-tau blends among successes | 3 | 4 |
+| Clipping or extrapolation among successes | 0 | 0 |
+
+All 53 new rejections are for negative **spheroid** gas-metal mass. Row samples
+are not galaxy-ID matched across releases; this is a compatibility/input-quality
+check, not a controlled physical comparison. Dust parameters and input policy
+were not retuned to make the updated sample pass.
+
+The full-column audit of the new file found one negative disk entry (about
+−751 Msun) and 20,305 negative spheroid entries. Neither column contains
+nonfinite values. Among negative spheroid entries, the absolute mass has a
+median of 0.0898 Msun, a 99th percentile of 426 Msun, and a maximum of
+19,751 Msun; 13,972 are at most 1 Msun in magnitude. Thus the old enormous
+10^13–10^15 Msun negative values are absent in this file, but strict positivity
+still rejects residual cases. These results do not establish the cause or
+acceptable tolerance for the remaining negatives.
+
+The recorded run took 3.23 seconds (12.6 ms/attempt) and used 204 MiB peak RSS
+before plotting and the full-column audit. As before, initialization is excluded
+and failed rows contribute to the timing. Different inputs, software and line
+sets mean these timings are not a controlled performance comparison.
+
+The [complete report](validation/fixes1-smoke/benson_diffuse_galaxy.json)
+records every failed sample row, input SHA-256 fingerprints, parameters and
+full-column statistics. [Reproduction instructions](validation/fixes1-smoke/README.md)
+also accompany the new illustrative row-0 plot below. The earlier bundled
+example above is retained and is a different galaxy.
+
+![Diffuse-only SED and shared line transfer for Fixes1 row 0](validation/fixes1-smoke/benson_diffuse_galaxy.png)

@@ -33,6 +33,34 @@ def _finite_scalar(name, value):
     return float(value)
 
 
+def galacticus_units_in_si(dataset):
+    """Read explicit physical-unit conversion from legacy or structured metadata.
+
+    Modern Galacticus stores a scalar compound ``units`` attribute containing
+    ``unitsInSI`` and ``isComoving``. Reject comoving quantities rather than
+    interpreting them as physical radii, and reject conflicting declarations.
+    """
+    factors = []
+    if 'unitsInSI' in dataset.attrs:
+        factors.append(_finite_scalar(f'{dataset.name}.unitsInSI', dataset.attrs['unitsInSI']))
+    if 'units' in dataset.attrs:
+        record = np.asarray(dataset.attrs['units'])
+        if record.shape != () or not record.dtype.names or 'unitsInSI' not in record.dtype.names:
+            raise ValueError(f'Malformed structured units for {dataset.name}')
+        if 'isComoving' not in record.dtype.names:
+            raise ValueError(f'Missing isComoving in structured units for {dataset.name}')
+        if _finite_scalar('isComoving', record['isComoving']) != 0:
+            raise ValueError(f'Comoving units are unsupported for {dataset.name}; supply physical quantities')
+        factors.append(_finite_scalar(f'{dataset.name}.units.unitsInSI', record['unitsInSI']))
+    if not factors:
+        raise ValueError(f'Missing unitsInSI or structured units for {dataset.name}; units must be explicit')
+    if any(factor <= 0 for factor in factors):
+        raise ValueError(f'{dataset.name}.unitsInSI must be positive')
+    if len(factors) == 2 and not np.isclose(*factors, rtol=1e-12, atol=0):
+        raise ValueError(f'Conflicting unit metadata for {dataset.name}')
+    return factors[0]
+
+
 @dataclass(frozen=True)
 class DiffuseDustParameters:
     dust_to_metals_ratio: float = 0.334
@@ -87,11 +115,7 @@ def read_diffuse_galaxy_inputs(node_data, galaxy_index, *, inclination_degrees=N
         ds = node_data[name]
         if ds.ndim != 1 or galaxy_index >= len(ds):
             raise ValueError(f"Invalid row/shape for {name}")
-        if "unitsInSI" not in ds.attrs:
-            raise ValueError(f"Missing unitsInSI for {name}; units must be explicit")
-        factor = _finite_scalar(f"{name}.unitsInSI", ds.attrs["unitsInSI"])
-        if factor <= 0:
-            raise ValueError(f"{name}.unitsInSI must be positive")
+        factor = galacticus_units_in_si(ds)
         units[name] = factor
         return float(ds[galaxy_index]) * factor / target_si
 

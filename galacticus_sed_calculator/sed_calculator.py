@@ -706,7 +706,7 @@ class SEDCalculator:
         applied. Existing spectrum and magnitude APIs are unchanged. Stellar
         and nebular sources share the component's diffuse transfer.
         """
-        from .galaxy_diffuse import ComponentLight, read_diffuse_galaxy_inputs
+        from .galaxy_diffuse import ComponentLight, galacticus_units_in_si, read_diffuse_galaxy_inputs
 
         wave = (wavelength_micron.to_value(u.micron) if isinstance(wavelength_micron, u.Quantity)
                 else np.asarray(wavelength_micron, dtype=float))
@@ -736,11 +736,7 @@ class SEDCalculator:
                     luminosities = []
                     for path in paths[selected]:
                         dataset = f[path]
-                        if 'unitsInSI' not in dataset.attrs:
-                            raise ValueError(f"Missing unitsInSI for emission-line luminosity: {path}")
-                        factor = float(dataset.attrs['unitsInSI'])
-                        if not np.isfinite(factor) or factor <= 0:
-                            raise ValueError(f"Invalid unitsInSI for emission-line luminosity: {path}")
+                        factor = galacticus_units_in_si(dataset)
                         luminosities.append(dataset[galIndex] * factor / u.erg.to(u.J))
                     lines = np.asarray(luminosities)
                 components[component] = ComponentLight(stellar, line_wave, lines, names)
