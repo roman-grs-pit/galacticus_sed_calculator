@@ -117,6 +117,11 @@ values and supplied catalog units/profile declarations are retained in diagnosti
 - Spheroid gas metals are **not** put into the disk. Their mass and fraction of
   total gas metals are recorded, and any positive amount sets a coverage flag.
   This flag is not a threshold declaring the approximation scientifically safe.
+  Negative spheroid metals set `negative_spheroid_metals` and evaluation
+  continues: this input does not determine diffuse attenuation. The signed
+  original mass is preserved, the fraction is `None` (not physically defined),
+  and `spheroid_metal_mass_msun_used` is always `None`. No spheroid mass is
+  sanitized. A future prescription that uses these metals needs its own policy.
 - No disk dust means unity diffuse transfer, even with substantial spheroid
   metals. A nonzero diffuse dust mass requires a valid positive disk radius,
   whether or not disk light is present.
@@ -125,7 +130,7 @@ values and supplied catalog units/profile declarations are retained in diagnosti
   An absent source returns zero light with identity transmission as a sentinel;
   its coordinates explicitly record `source_has_light=False`.
 - Negative/nonfinite light, nonfinite masses, and relevant invalid radii raise.
-  Metal masses are strictly nonnegative by default. An explicitly configured
+  Disk metal masses are strictly nonnegative by default. An explicitly configured
   absolute `negative_metal_tolerance_msun` permits only values within that bound
   to be replaced by zero, recording both the original value and a flag.
   There is no automatic tolerance scaled to the galaxy's mass.
@@ -139,13 +144,14 @@ The schema-v1 integer `diagnostics["status"]` is a bitwise OR of:
 | ---: | --- |
 | 1 | Ignored positive spheroid gas-metal mass |
 | 2 | Disk metal mass sanitized within the explicit tolerance |
-| 4 | Spheroid metal mass sanitized within the explicit tolerance |
+| 4 | Reserved legacy spheroid-sanitation bit; no longer emitted |
 | 8 | Low-optical-depth transmission blend |
 | 16 | Optical depth clipped |
 | 32 | Optical depth extrapolated |
 | 64 | Source scale ratio clipped |
 | 128 | Wavelength endpoint roundoff |
 | 256 | Positive slope in the atlas extrapolation fit |
+| 512 | Negative spheroid gas-metal mass; recorded without affecting attenuation |
 
 String flag names are also returned; invalid galaxies raise and do not receive
 a fabricated successful result. Original irrelevant radii may be missing or
@@ -196,6 +202,8 @@ and 58 rejections**, all rejections due to negative gas-metal masses. Of the
 successes, 171 flagged ignored spheroid metals and three used the low-tau
 blend; none needed extrapolation or clipping. This is an unweighted sample,
 not a population completeness or accuracy estimate.
+This historical run used the former policy rejecting negative metals in either
+component; the current model only rejects negative disk metals by default.
 
 On the development Mac (Python 3.12), those 256 attempts at 369 wavelengths
 plus lines took 1.84 seconds (7.2 ms/attempt), excluding template/provider
@@ -219,33 +227,36 @@ directory. SFH/template compatibility validation passed. This is one local
 catalog file, not an audit of the whole 400-file release.
 
 The same 256 evenly spaced row-index protocol, 369 wavelengths over 0.12–2 µm,
-stellar plus nebular light, and **unchanged zero negative-metal tolerance** gave:
+stellar plus nebular light, and **zero disk negative-metal tolerance** gave:
 
-| Result | Original catalog (historical) | Fixes1 catalog |
+| Result | Fixes1: former validation | Fixes1: diagnostic-only spheroid metals |
 | --- | ---: | ---: |
-| Successful evaluations | 198 | 203 |
-| Rejected negative-metal inputs | 58 | 53 |
-| Ignored-spheroid-metals flags among successes | 171 | 175 |
-| Low-tau blends among successes | 3 | 4 |
+| Successful evaluations | 203 | 256 |
+| Rejected negative-metal inputs | 53 | 0 |
+| Negative-spheroid-metals flags | — | 53 |
+| Ignored positive spheroid-metals flags | 175 | 175 |
+| Low-tau blends among successes | 4 | 6 |
 | Clipping or extrapolation among successes | 0 | 0 |
 
-All 53 new rejections are for negative **spheroid** gas-metal mass. Row samples
-are not galaxy-ID matched across releases; this is a compatibility/input-quality
-check, not a controlled physical comparison. Dust parameters and input policy
-were not retuned to make the updated sample pass.
+All 53 former rejections were for negative **spheroid** gas-metal mass and now
+continue with a diagnostic flag. Dust parameters are unchanged; the validation
+policy now reflects which metals actually enter the diffuse calculation. Row
+samples are not galaxy-ID matched across releases; this is a compatibility/input-
+quality check, not a controlled physical comparison.
 
 The full-column audit of the new file found one negative disk entry (about
 −751 Msun) and 20,305 negative spheroid entries. Neither column contains
 nonfinite values. Among negative spheroid entries, the absolute mass has a
 median of 0.0898 Msun, a 99th percentile of 426 Msun, and a maximum of
 19,751 Msun; 13,972 are at most 1 Msun in magnitude. Thus the old enormous
-10^13–10^15 Msun negative values are absent in this file, but strict positivity
-still rejects residual cases. These results do not establish the cause or
-acceptable tolerance for the remaining negatives.
+10^13–10^15 Msun negative values are absent in this file. The one negative disk
+entry (row 28174) lies outside the sample and would still be rejected. These
+results do not establish the cause or acceptable tolerance for negative metals
+in any model that actually uses them.
 
-The recorded run took 3.23 seconds (12.6 ms/attempt) and used 204 MiB peak RSS
+The recorded run took 3.26 seconds (12.7 ms/attempt) and used 190 MiB peak RSS
 before plotting and the full-column audit. As before, initialization is excluded
-and failed rows contribute to the timing. Different inputs, software and line
+and all 256 rows succeeded. Different inputs, software and line
 sets mean these timings are not a controlled performance comparison.
 
 The [complete report](validation/fixes1-smoke/benson_diffuse_galaxy.json)

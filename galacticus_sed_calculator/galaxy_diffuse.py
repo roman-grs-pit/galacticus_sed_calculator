@@ -17,13 +17,14 @@ class DiffuseStatus(IntFlag):
 
     IGNORED_SPHEROID_METALS = 1
     DISK_METALS_SANITIZED = 2
-    SPHEROID_METALS_SANITIZED = 4
+    SPHEROID_METALS_SANITIZED = 4  # Reserved legacy bit; no longer emitted.
     LOW_OPTICAL_DEPTH_BLEND = 8
     OPTICAL_DEPTH_CLIPPED = 16
     OPTICAL_DEPTH_EXTRAPOLATED = 32
     SCALE_RATIO_CLIPPED = 64
     WAVELENGTH_ENDPOINT_ROUNDOFF = 128
     EXTRAPOLATION_POSITIVE_SLOPE = 256
+    NEGATIVE_SPHEROID_METALS = 512
 
 
 def _finite_scalar(name, value):
@@ -66,6 +67,7 @@ class DiffuseDustParameters:
     dust_to_metals_ratio: float = 0.334
     cloud_fraction: float = 0.25
     negative_metal_tolerance_msun: float = 0.0
+    # The tolerance applies only to disk metals, which determine diffuse dust.
 
     def __post_init__(self):
         for name in ("dust_to_metals_ratio", "cloud_fraction", "negative_metal_tolerance_msun"):
@@ -210,16 +212,18 @@ class BensonGalaxyDust:
 
     def _coordinates(self, galaxy):
         flags = set()
-        masses = {}
-        for component in ("disk", "spheroid"):
-            name = f"{component}_metal_mass_msun"
-            original = _finite_scalar(name, getattr(galaxy, name))
-            if original < -self.parameters.negative_metal_tolerance_msun:
-                raise ValueError(f"{name}={original:g} is below the explicit negative-metal tolerance")
-            masses[component] = max(original, 0.0)
-            if original < 0:
-                flags.add(f"{component}_metals_sanitized")
-        if masses["spheroid"] > 0:
+        disk_metals = _finite_scalar("disk_metal_mass_msun", galaxy.disk_metal_mass_msun)
+        if disk_metals < -self.parameters.negative_metal_tolerance_msun:
+            raise ValueError(f"disk_metal_mass_msun={disk_metals:g} is below the explicit negative-metal tolerance")
+        if disk_metals < 0:
+            flags.add("disk_metals_sanitized")
+            disk_metals = 0.0
+        # Spheroid metals are diagnostic only for this disk-dust geometry.
+        # Preserve negatives rather than rejecting or silently sanitizing them.
+        spheroid_metals = _finite_scalar("spheroid_metal_mass_msun", galaxy.spheroid_metal_mass_msun)
+        if spheroid_metals < 0:
+            flags.add("negative_spheroid_metals")
+        elif spheroid_metals > 0:
             flags.add("ignored_spheroid_metals")
         if galaxy.inclination_degrees is not None:
             inclination = _finite_scalar("inclination_degrees", galaxy.inclination_degrees)
@@ -235,7 +239,7 @@ class BensonGalaxyDust:
             inclination = float(np.degrees(np.arccos(uniform)))
             orientation_source = "randomUniform[:,1]"
         dust_mass = ((1 - self.parameters.cloud_fraction) * self.parameters.dust_to_metals_ratio
-                     * masses["disk"])
+                     * disk_metals)
         tau = 0.0
         if dust_mass > 0:
             if galaxy.catalog_profiles.get('disk', 'exponentialDisk') != 'exponentialDisk':
@@ -247,16 +251,18 @@ class BensonGalaxyDust:
             tau = opacity * dust_mass * u.Msun.to(u.g) / (2*np.pi*(radius*u.Mpc.to(u.cm))**2)
             if not np.isfinite(tau):
                 raise ValueError("Nonfinite optical depth from dust mass and disk radius")
-        total_metals = masses["disk"] + masses["spheroid"]
+        total_metals = disk_metals + spheroid_metals
+        ignored_fraction = (None if spheroid_metals < 0 else
+                            spheroid_metals/total_metals if total_metals else 0.0)
         diagnostics = {
             "inclination_degrees": inclination, "orientation_source": orientation_source,
             "disk_optical_depth_v": tau, "diffuse_disk_dust_mass_msun": dust_mass,
-            "ignored_spheroid_metal_mass_msun": masses["spheroid"],
-            "ignored_spheroid_metal_fraction": masses["spheroid"]/total_metals if total_metals else 0.0,
+            "ignored_spheroid_metal_mass_msun": spheroid_metals,
+            "ignored_spheroid_metal_fraction": ignored_fraction,
             "spheroid_scale_ratio": None,
             "original_inputs": asdict(galaxy),
-            "disk_metal_mass_msun_used": masses["disk"],
-            "spheroid_metal_mass_msun_used": masses["spheroid"],
+            "disk_metal_mass_msun_used": disk_metals,
+            "spheroid_metal_mass_msun_used": None,
         }
         return diagnostics, flags
 

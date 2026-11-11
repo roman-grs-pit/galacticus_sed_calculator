@@ -71,7 +71,7 @@ def test_explicit_orientation_overrides_unused_random(model, galaxy):
     ({"orientation_uniform": np.nan}, 'finite'),
     ({"inclination_degrees": -1}, 'in \\[0,90\\]'),
     ({"disk_metal_mass_msun": -1}, 'negative-metal tolerance'),
-    ({"spheroid_metal_mass_msun": -1e12}, 'negative-metal tolerance'),
+    ({"spheroid_metal_mass_msun": np.nan}, 'finite'),
     ({"disk_metal_mass_msun": np.inf}, 'finite'),
     ({"disk_scale_radius_mpc": 0}, 'positive disk'),
     ({"disk_scale_radius_mpc": None}, 'finite'),
@@ -95,12 +95,35 @@ def test_bounded_sanitation_is_opt_in_and_records_original(model, galaxy):
         evaluate(model, bad)
     permissive = BensonGalaxyDust(model.provider, DiffuseDustParameters(negative_metal_tolerance_msun=1e-8))
     result = evaluate(permissive, bad)
-    assert result.diagnostics['status'] == int(DiffuseStatus.DISK_METALS_SANITIZED | DiffuseStatus.SPHEROID_METALS_SANITIZED)
+    assert result.diagnostics['status'] == int(DiffuseStatus.DISK_METALS_SANITIZED | DiffuseStatus.NEGATIVE_SPHEROID_METALS)
     assert result.diagnostics['original_inputs']['disk_metal_mass_msun'] == -1e-8
     assert result.diagnostics['disk_metal_mass_msun_used'] == 0
     np.testing.assert_array_equal(result.components['disk'].stellar_lnu, [1, 1])
     with pytest.raises(ValueError):
         evaluate(permissive, replace(bad, disk_metal_mass_msun=-1e-7))
+
+
+@pytest.mark.parametrize('spheroid_metals', [-1e-12, -1, -1e12])
+@pytest.mark.parametrize('disk_metals', [0, 1e7])
+def test_negative_spheroid_metals_flagged_without_changing_any_light(model, galaxy, spheroid_metals, disk_metals):
+    light = ComponentLight(np.array([2., 3.]), np.array([0.3, 1.]), np.array([7., 11.]))
+    inputs = replace(galaxy, disk_metal_mass_msun=disk_metals,
+                     spheroid_metal_mass_msun=spheroid_metals)
+    result = model.apply([0.3, 1.], inputs, {'disk': light, 'spheroid': light})
+    reference = model.apply([0.3, 1.], replace(inputs, spheroid_metal_mass_msun=0),
+                            {'disk': light, 'spheroid': light})
+    for component in result.components:
+        for field in ('stellar_lnu', 'line_luminosity', 'stellar_transmission', 'line_transmission'):
+            np.testing.assert_array_equal(getattr(result.components[component], field),
+                                          getattr(reference.components[component], field))
+    assert result.diagnostics['disk_optical_depth_v'] == reference.diagnostics['disk_optical_depth_v']
+    assert result.diagnostics['status'] & DiffuseStatus.NEGATIVE_SPHEROID_METALS
+    assert not result.diagnostics['status'] & DiffuseStatus.SPHEROID_METALS_SANITIZED
+    assert result.diagnostics['ignored_spheroid_metal_mass_msun'] == spheroid_metals
+    assert result.diagnostics['original_inputs']['spheroid_metal_mass_msun'] == spheroid_metals
+    assert result.diagnostics['ignored_spheroid_metal_fraction'] is None
+    assert result.diagnostics['spheroid_metal_mass_msun_used'] is None
+    json.dumps(result.diagnostics, allow_nan=False)
 
 
 @pytest.mark.parametrize("params", [DiffuseDustParameters(), DiffuseDustParameters(cloud_fraction=1),

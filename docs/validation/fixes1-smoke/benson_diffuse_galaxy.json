@@ -51,7 +51,8 @@
       "optical_depth_extrapolated": 32,
       "scale_ratio_clipped": 64,
       "wavelength_endpoint_roundoff": 128,
-      "extrapolation_positive_slope": 256
+      "extrapolation_positive_slope": 256,
+      "negative_spheroid_metals": 512
     },
     "composition": "diffuse_only_on_supplied_light; no implicit local or empirical attenuation"
   },
@@ -82,7 +83,7 @@
       }
     },
     "disk_metal_mass_msun_used": 88110479.84082934,
-    "spheroid_metal_mass_msun_used": 417498.3974999465,
+    "spheroid_metal_mass_msun_used": null,
     "flags": [
       "ignored_spheroid_metals"
     ],
@@ -92,230 +93,18 @@
   },
   "sample": {
     "rows": 256,
-    "successful": 203,
-    "seconds": 3.2325985410716385,
-    "milliseconds_per_attempt": 12.627338051061088,
+    "successful": 256,
+    "seconds": 3.2599500839132816,
+    "milliseconds_per_attempt": 12.734180015286256,
     "flags_among_successes": {
       "ignored_spheroid_metals": 175,
-      "low_optical_depth_blend": 4
+      "negative_spheroid_metals": 53,
+      "low_optical_depth_blend": 6
     },
-    "failures": [
-      {
-        "galaxy_index": 1134,
-        "error": "spheroid_metal_mass_msun=-0.13173 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 1512,
-        "error": "spheroid_metal_mass_msun=-0.0180405 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 1890,
-        "error": "spheroid_metal_mass_msun=-13.6866 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 3025,
-        "error": "spheroid_metal_mass_msun=-0.0694053 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 5293,
-        "error": "spheroid_metal_mass_msun=-0.000205714 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 6050,
-        "error": "spheroid_metal_mass_msun=-0.00666088 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 8696,
-        "error": "spheroid_metal_mass_msun=-0.544511 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 10209,
-        "error": "spheroid_metal_mass_msun=-86.2042 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 13234,
-        "error": "spheroid_metal_mass_msun=-0.0740506 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 13612,
-        "error": "spheroid_metal_mass_msun=-1.30518e-08 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 16637,
-        "error": "spheroid_metal_mass_msun=-0.173149 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 17393,
-        "error": "spheroid_metal_mass_msun=-0.051184 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 17771,
-        "error": "spheroid_metal_mass_msun=-0.10283 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 18150,
-        "error": "spheroid_metal_mass_msun=-1.50492 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 20796,
-        "error": "spheroid_metal_mass_msun=-0.000135478 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 24578,
-        "error": "spheroid_metal_mass_msun=-2.7638e-09 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 30628,
-        "error": "spheroid_metal_mass_msun=-0.0123754 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 31384,
-        "error": "spheroid_metal_mass_msun=-14.1568 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 37056,
-        "error": "spheroid_metal_mass_msun=-0.722371 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 38190,
-        "error": "spheroid_metal_mass_msun=-4.8244 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 38946,
-        "error": "spheroid_metal_mass_msun=-1.99543 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 41593,
-        "error": "spheroid_metal_mass_msun=-0.0287434 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 41971,
-        "error": "spheroid_metal_mass_msun=-0.375417 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 43862,
-        "error": "spheroid_metal_mass_msun=-71.7456 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 44618,
-        "error": "spheroid_metal_mass_msun=-0.266104 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 46131,
-        "error": "spheroid_metal_mass_msun=-143.838 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 58987,
-        "error": "spheroid_metal_mass_msun=-0.203715 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 59365,
-        "error": "spheroid_metal_mass_msun=-1.86348 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 60878,
-        "error": "spheroid_metal_mass_msun=-0.771224 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 61256,
-        "error": "spheroid_metal_mass_msun=-0.0216707 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 63146,
-        "error": "spheroid_metal_mass_msun=-0.0831828 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 63903,
-        "error": "spheroid_metal_mass_msun=-0.0104083 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 66550,
-        "error": "spheroid_metal_mass_msun=-0.0970239 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 67306,
-        "error": "spheroid_metal_mass_msun=-0.0290195 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 67684,
-        "error": "spheroid_metal_mass_msun=-0.0285762 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 69575,
-        "error": "spheroid_metal_mass_msun=-0.0127801 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 71087,
-        "error": "spheroid_metal_mass_msun=-0.198998 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 71843,
-        "error": "spheroid_metal_mass_msun=-0.0595267 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 74112,
-        "error": "spheroid_metal_mass_msun=-0.0961213 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 75246,
-        "error": "spheroid_metal_mass_msun=-0.10963 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 77515,
-        "error": "spheroid_metal_mass_msun=-5.47743e-07 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 79784,
-        "error": "spheroid_metal_mass_msun=-7.50019 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 82053,
-        "error": "spheroid_metal_mass_msun=-0.000513335 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 85834,
-        "error": "spheroid_metal_mass_msun=-0.00958558 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 90750,
-        "error": "spheroid_metal_mass_msun=-20.5033 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 91506,
-        "error": "spheroid_metal_mass_msun=-0.0144368 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 91884,
-        "error": "spheroid_metal_mass_msun=-3.15011 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 92262,
-        "error": "spheroid_metal_mass_msun=-426.312 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 93018,
-        "error": "spheroid_metal_mass_msun=-0.000448921 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 93396,
-        "error": "spheroid_metal_mass_msun=-3.7182e-08 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 93775,
-        "error": "spheroid_metal_mass_msun=-6.50657 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 94909,
-        "error": "spheroid_metal_mass_msun=-8.44165 is below the explicit negative-metal tolerance"
-      },
-      {
-        "galaxy_index": 96043,
-        "error": "spheroid_metal_mass_msun=-0.069013 is below the explicit negative-metal tolerance"
-      }
-    ],
+    "failures": [],
     "sampling": "evenly spaced row indices; unweighted; one warm process"
   },
-  "peak_rss_before_plot_mib": 203.578125,
+  "peak_rss_before_plot_mib": 189.859375,
   "inputs": {
     "catalog": {
       "filename": "romanUNIT-d1_25_16sqDeg.hdf5",
