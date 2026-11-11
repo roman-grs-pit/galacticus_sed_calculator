@@ -4,9 +4,10 @@
 [issue #49](https://github.com/roman-grs-pit/galacticus_sed_calculator/issues/49).
 It returns diffuse transmission for disk and spheroid sources through
 disk-distributed dust. It can be used with continuum or nebular light when
-their source geometry matches. It does not yet connect to `SEDCalculator`,
-add a `clouds_diffuse` YAML option, or implement birth clouds or a
-galaxy-to-optical-depth conversion.
+their source geometry matches. The [galaxy adapter and rest-frame SED API](GALAXY_DIFFUSE.md)
+now map catalog properties to optical depth and apply diffuse transfer to
+separate stellar/nebular component light. There is not yet a `clouds_diffuse`
+YAML option or a birth-cloud prescription.
 
 ## Visual guide
 

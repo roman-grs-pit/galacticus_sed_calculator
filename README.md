@@ -184,6 +184,11 @@ timing and lightweight interpolation checks. This is the first component of
 the planned `clouds_diffuse` model; it is not yet a selectable catalog/SED dust
 configuration.
 
+The [galaxy adapter](docs/GALAXY_DIFFUSE.md) provides an explicit diffuse-only
+rest-frame SED API, including gas-metal/size-to-optical-depth conversion,
+deterministic orientation, separate disk/spheroid continua and line luminosities,
+and per-galaxy diagnostics. Existing spectrum/magnitude APIs are unchanged.
+
 ## Generate catalog spectra
 
 `generate_catalog_seds.py` writes observed-frame spectra, galaxy identifiers,
