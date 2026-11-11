@@ -7,6 +7,7 @@ applies an empirical line model or interprets one as local attenuation.
 
 from dataclasses import asdict, dataclass, field
 from enum import IntFlag
+import warnings
 
 import astropy.units as u
 import numpy as np
@@ -25,6 +26,10 @@ class DiffuseStatus(IntFlag):
     WAVELENGTH_ENDPOINT_ROUNDOFF = 128
     EXTRAPOLATION_POSITIVE_SLOPE = 256
     NEGATIVE_SPHEROID_METALS = 512
+
+
+class NumericalMetalMassWarning(UserWarning):
+    """A bounded negative disk metal residual was treated as zero for dust."""
 
 
 def _finite_scalar(name, value):
@@ -66,11 +71,13 @@ def galacticus_units_in_si(dataset):
 class DiffuseDustParameters:
     dust_to_metals_ratio: float = 0.334
     cloud_fraction: float = 0.25
-    negative_metal_tolerance_msun: float = 0.0
-    # The tolerance applies only to disk metals, which determine diffuse dust.
+    # Provisional, configurable post-processing tolerances, not ODE error bounds.
+    negative_metal_tolerance_msun: float = 1.0
+    negative_metal_relative_tolerance: float = 1e-4
 
     def __post_init__(self):
-        for name in ("dust_to_metals_ratio", "cloud_fraction", "negative_metal_tolerance_msun"):
+        for name in ("dust_to_metals_ratio", "cloud_fraction", "negative_metal_tolerance_msun",
+                     "negative_metal_relative_tolerance"):
             value = _finite_scalar(name, getattr(self, name))
             if value < 0 or (name != "negative_metal_tolerance_msun" and value > 1):
                 raise ValueError(f"Invalid {name}")
@@ -95,6 +102,9 @@ class DiffuseGalaxyInputs:
     inclination_degrees: float | None = None
     catalog_units_in_si: dict = field(default_factory=dict)
     catalog_profiles: dict = field(default_factory=dict)
+    # Optional positive gas-plus-stellar mass of the disk, used only to bound
+    # numerical metal residuals. No halo or other-component mass contributes.
+    disk_mass_reference_msun: float | None = None
 
 
 def read_diffuse_galaxy_inputs(node_data, galaxy_index, *, inclination_degrees=None):
@@ -123,6 +133,13 @@ def read_diffuse_galaxy_inputs(node_data, galaxy_index, *, inclination_degrees=N
 
     disk_metals = read("diskAbundancesGasMetals", u.Msun.to(u.kg))
     spheroid_metals = read("spheroidAbundancesGasMetals", u.Msun.to(u.kg))
+    reference = None
+    if disk_metals < 0:
+        gas = read("diskMassGas", u.Msun.to(u.kg), optional=True)
+        stars = read("diskMassStellar", u.Msun.to(u.kg), optional=True)
+        if gas is not None and stars is not None:
+            reference = (max(_finite_scalar("diskMassGas", gas), 0.0)
+                         + max(_finite_scalar("diskMassStellar", stars), 0.0))
     disk_radius = read("diskRadius", u.Mpc.to(u.m), optional=True)
     spheroid_radius = read("spheroidRadius", u.Mpc.to(u.m), optional=True)
     orientation = None
@@ -141,7 +158,7 @@ def read_diffuse_galaxy_inputs(node_data, galaxy_index, *, inclination_degrees=N
             name = group.attrs[attribute]
             profiles[component.lower()] = name.decode() if isinstance(name, bytes) else str(name)
     return DiffuseGalaxyInputs(disk_metals, spheroid_metals, disk_radius, spheroid_radius,
-                              orientation, inclination_degrees, units, profiles)
+                              orientation, inclination_degrees, units, profiles, reference)
 
 
 @dataclass(frozen=True)
@@ -213,11 +230,23 @@ class BensonGalaxyDust:
     def _coordinates(self, galaxy):
         flags = set()
         disk_metals = _finite_scalar("disk_metal_mass_msun", galaxy.disk_metal_mass_msun)
-        if disk_metals < -self.parameters.negative_metal_tolerance_msun:
-            raise ValueError(f"disk_metal_mass_msun={disk_metals:g} is below the explicit negative-metal tolerance")
+        reference = None
+        tolerance = self.parameters.negative_metal_tolerance_msun
+        if disk_metals < 0 and self.parameters.negative_metal_relative_tolerance > 0:
+            if galaxy.disk_mass_reference_msun is not None:
+                reference = _finite_scalar("disk_mass_reference_msun", galaxy.disk_mass_reference_msun)
+                if reference < 0:
+                    raise ValueError("disk_mass_reference_msun must be nonnegative")
+                tolerance = max(tolerance, self.parameters.negative_metal_relative_tolerance * reference)
+        if disk_metals < -tolerance:
+            raise ValueError(f"disk_metal_mass_msun={disk_metals:g} is below the negative-metal tolerance "
+                             f"of {tolerance:g} Msun")
         if disk_metals < 0:
             flags.add("disk_metals_sanitized")
             disk_metals = 0.0
+            warnings.warn("Small negative disk gas-metal mass treated as zero for diffuse dust; "
+                          "original mass and tolerance are retained in diagnostics.",
+                          NumericalMetalMassWarning, stacklevel=3)
         # Spheroid metals are diagnostic only for this disk-dust geometry.
         # Preserve negatives rather than rejecting or silently sanitizing them.
         spheroid_metals = _finite_scalar("spheroid_metal_mass_msun", galaxy.spheroid_metal_mass_msun)
@@ -262,6 +291,8 @@ class BensonGalaxyDust:
             "spheroid_scale_ratio": None,
             "original_inputs": asdict(galaxy),
             "disk_metal_mass_msun_used": disk_metals,
+            "disk_negative_metal_tolerance_msun": tolerance,
+            "disk_negative_metal_reference_msun": reference,
             "spheroid_metal_mass_msun_used": None,
         }
         return diagnostics, flags

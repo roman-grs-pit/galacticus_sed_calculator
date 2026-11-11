@@ -16,7 +16,7 @@ from galacticus_sed_calculator import SEDCalculator
 from galacticus_sed_calculator.diffuse_dust import Benson2018DiffuseProvider
 from galacticus_sed_calculator.galaxy_diffuse import (
     BensonGalaxyDust, ComponentLight, DiffuseDustParameters, DiffuseGalaxyInputs,
-    DiffuseStatus, galacticus_units_in_si, read_diffuse_galaxy_inputs,
+    DiffuseStatus, NumericalMetalMassWarning, galacticus_units_in_si, read_diffuse_galaxy_inputs,
 )
 from test_diffuse_dust import atlas  # Reuse the small, checksum-verified analytic atlas fixture.
 
@@ -70,7 +70,7 @@ def test_explicit_orientation_overrides_unused_random(model, galaxy):
     ({"orientation_uniform": 1.1}, 'in \\[0,1\\]'),
     ({"orientation_uniform": np.nan}, 'finite'),
     ({"inclination_degrees": -1}, 'in \\[0,90\\]'),
-    ({"disk_metal_mass_msun": -1}, 'negative-metal tolerance'),
+    ({"disk_metal_mass_msun": -2}, 'negative-metal tolerance'),
     ({"spheroid_metal_mass_msun": np.nan}, 'finite'),
     ({"disk_metal_mass_msun": np.inf}, 'finite'),
     ({"disk_scale_radius_mpc": 0}, 'positive disk'),
@@ -83,24 +83,51 @@ def test_invalid_galaxy_inputs(model, galaxy, changed, match):
 
 
 @pytest.mark.parametrize("params", [dict(cloud_fraction=1.1), dict(dust_to_metals_ratio=-1),
-                                   dict(negative_metal_tolerance_msun=-1), dict(cloud_fraction=np.nan)])
+                                   dict(negative_metal_tolerance_msun=-1), dict(cloud_fraction=np.nan),
+                                   dict(negative_metal_relative_tolerance=-1),
+                                   dict(negative_metal_relative_tolerance=np.inf)])
 def test_invalid_parameters(params):
     with pytest.raises(ValueError):
         DiffuseDustParameters(**params)
 
 
-def test_bounded_sanitation_is_opt_in_and_records_original(model, galaxy):
+def test_bounded_sanitation_can_be_strict_and_records_original(model, galaxy):
     bad = replace(galaxy, disk_metal_mass_msun=-1e-8, spheroid_metal_mass_msun=-1e-9)
+    strict = BensonGalaxyDust(model.provider, DiffuseDustParameters(
+        negative_metal_tolerance_msun=0, negative_metal_relative_tolerance=0))
     with pytest.raises(ValueError):
-        evaluate(model, bad)
+        evaluate(strict, bad)
     permissive = BensonGalaxyDust(model.provider, DiffuseDustParameters(negative_metal_tolerance_msun=1e-8))
-    result = evaluate(permissive, bad)
+    with pytest.warns(NumericalMetalMassWarning):
+        result = evaluate(permissive, bad)
     assert result.diagnostics['status'] == int(DiffuseStatus.DISK_METALS_SANITIZED | DiffuseStatus.NEGATIVE_SPHEROID_METALS)
     assert result.diagnostics['original_inputs']['disk_metal_mass_msun'] == -1e-8
     assert result.diagnostics['disk_metal_mass_msun_used'] == 0
     np.testing.assert_array_equal(result.components['disk'].stellar_lnu, [1, 1])
     with pytest.raises(ValueError):
         evaluate(permissive, replace(bad, disk_metal_mass_msun=-1e-7))
+
+
+@pytest.mark.parametrize('mass,reference,limit', [(-1, None, 1), (-1e-12, None, 1),
+                                                (-100, 1e6, 100), (-1, 0, 1)])
+def test_default_small_residual_warns_and_only_zeros_dust_input(model, galaxy, mass, reference, limit):
+    inputs = replace(galaxy, disk_metal_mass_msun=mass, disk_mass_reference_msun=reference)
+    with pytest.warns(NumericalMetalMassWarning):
+        result = evaluate(model, inputs)
+    assert inputs.disk_metal_mass_msun == mass
+    assert result.diagnostics['original_inputs']['disk_metal_mass_msun'] == mass
+    assert result.diagnostics['disk_negative_metal_tolerance_msun'] == limit
+    assert result.diagnostics['disk_metal_mass_msun_used'] == 0
+    assert result.diagnostics['status'] & DiffuseStatus.DISK_METALS_SANITIZED
+    np.testing.assert_array_equal(result.components['disk'].stellar_transmission, [1, 1])
+    with pytest.raises(ValueError, match='negative-metal tolerance'):
+        evaluate(model, replace(inputs, disk_metal_mass_msun=-limit*1.001))
+
+
+@pytest.mark.parametrize('reference', [-1, np.inf, np.nan])
+def test_invalid_relative_mass_reference(model, galaxy, reference):
+    with pytest.raises(ValueError, match='disk_mass_reference_msun'):
+        evaluate(model, replace(galaxy, disk_metal_mass_msun=-1, disk_mass_reference_msun=reference))
 
 
 @pytest.mark.parametrize('spheroid_metals', [-1e-12, -1, -1e12])
@@ -223,6 +250,17 @@ def test_catalog_reader_units_orientation_and_missing_fields(tmp_path, base):
         assert inputs.disk_scale_radius_mpc == pytest.approx(0.003)
         assert inputs.spheroid_scale_radius_mpc is None
         assert inputs.orientation_uniform == 0.25
+        assert inputs.disk_mass_reference_msun is None
+        node['diskAbundancesGasMetals'][0] = -0.1*u.Msun.to(u.kg)
+        # Optional reference fields also honor units; a negative reservoir does
+        # not increase the reference scale by contributing its absolute value.
+        node['diskMassGas'] = [-3*u.Msun.to(u.kg)]
+        node['diskMassGas'].attrs['unitsInSI'] = 1
+        node['diskMassStellar'] = [2e6*u.Msun.to(u.kg)]
+        node['diskMassStellar'].attrs['unitsInSI'] = 1
+        assert read_diffuse_galaxy_inputs(node, 0).disk_mass_reference_msun == pytest.approx(2e6)
+        del node['diskMassStellar']
+        assert read_diffuse_galaxy_inputs(node, 0).disk_mass_reference_msun is None
         del node['randomUniform']
         assert read_diffuse_galaxy_inputs(node, 0, inclination_degrees=12).inclination_degrees == 12
         with pytest.raises(ValueError, match='randomUniform'):

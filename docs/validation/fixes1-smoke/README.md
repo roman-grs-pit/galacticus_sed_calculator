@@ -2,8 +2,10 @@
 
 Recorded 2026-11-10 against PR #51. Inputs are read-only; no catalog data was
 altered. Negative spheroid metals are flagged and retained as diagnostics,
-because only disk metals determine diffuse dust. Disk negative-metal tolerance
-remains zero. This is the `d1_25` file, not all 400 release files.
+because only disk metals determine diffuse dust. Small negative disk metals
+warn and contribute zero dust within the configurable default tolerance
+`max(1 Msun, 1e-4 * positive disk gas-plus-stellar mass)`; larger negatives
+raise. This is the `d1_25` file, not all 400 release files.
 
 Set `MOCK_RELEASE` to the local directory
 `GP-MCMC-Calibration1-Fixes1_allUNIT_16sqDegMock_XMM-LSS` and `BENSON2018_ATLAS`
@@ -32,8 +34,11 @@ peak RSS is measured before hashing/audit/plotting. Timing and RSS vary by run.
 The initial attempt exposed two compatibility requirements: modern structured
 unit metadata and modern emission-line metadata. PR #51 now supports the former
 and incorporates the latter from `main`. The report was then regenerated after
-separating the spheroid diagnostic from disk-metal validation: all 256 sample
-rows succeed, including 53 flagged negative spheroid masses.
+separating the spheroid diagnostic from disk-metal validation and introducing
+bounded numerical disk residuals: all 256 sample rows succeed, including 53
+flagged negative spheroid masses. No sample row needs disk sanitation; its
+behavior is covered separately by regression tests. The negative disk entry
+outside this sample still exceeds the provisional tolerance.
 
 See [the main documentation](../../GALAXY_DIFFUSE.md#updated-test-calibration1-fixes1-2026-11-10)
 for the results and their interpretation. The report and plot are generated

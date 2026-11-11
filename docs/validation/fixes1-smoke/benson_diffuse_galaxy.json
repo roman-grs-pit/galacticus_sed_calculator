@@ -5,7 +5,8 @@
     "parameters": {
       "dust_to_metals_ratio": 0.334,
       "cloud_fraction": 0.25,
-      "negative_metal_tolerance_msun": 0.0
+      "negative_metal_tolerance_msun": 1.0,
+      "negative_metal_relative_tolerance": 0.0001
     },
     "provider": {
       "backend": "benson2018_rv4",
@@ -80,9 +81,12 @@
       "catalog_profiles": {
         "disk": "exponentialDisk",
         "spheroid": "hernquist"
-      }
+      },
+      "disk_mass_reference_msun": null
     },
     "disk_metal_mass_msun_used": 88110479.84082934,
+    "disk_negative_metal_tolerance_msun": 1.0,
+    "disk_negative_metal_reference_msun": null,
     "spheroid_metal_mass_msun_used": null,
     "flags": [
       "ignored_spheroid_metals"
@@ -94,8 +98,8 @@
   "sample": {
     "rows": 256,
     "successful": 256,
-    "seconds": 3.2599500839132816,
-    "milliseconds_per_attempt": 12.734180015286256,
+    "seconds": 2.9901092909276485,
+    "milliseconds_per_attempt": 11.680114417686127,
     "flags_among_successes": {
       "ignored_spheroid_metals": 175,
       "negative_spheroid_metals": 53,
@@ -104,7 +108,7 @@
     "failures": [],
     "sampling": "evenly spaced row indices; unweighted; one warm process"
   },
-  "peak_rss_before_plot_mib": 189.859375,
+  "peak_rss_before_plot_mib": 187.90625,
   "inputs": {
     "catalog": {
       "filename": "romanUNIT-d1_25_16sqDeg.hdf5",

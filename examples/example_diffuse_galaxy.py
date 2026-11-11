@@ -106,7 +106,11 @@ def main():
     parser.add_argument('--galaxy-index', type=int, default=0)
     parser.add_argument('--sample-size', type=int, default=0,
                         help='Also evaluate evenly spaced catalog rows; report failures, never silently sanitize')
-    parser.add_argument('--negative-metal-tolerance-msun', type=float, default=0.)
+    defaults = DiffuseDustParameters()
+    parser.add_argument('--negative-metal-tolerance-msun', type=float,
+                        default=defaults.negative_metal_tolerance_msun)
+    parser.add_argument('--negative-metal-relative-tolerance', type=float,
+                        default=defaults.negative_metal_relative_tolerance)
     parser.add_argument('--audit-metal-columns', action='store_true',
                         help='Audit both full metal columns and fingerprint input files (outside the timed sample)')
     parser.add_argument('--output-dir', type=Path, required=True)
@@ -119,7 +123,8 @@ def main():
     report = {}
     with Benson2018DiffuseProvider(receipt) as provider:
         model = BensonGalaxyDust(provider, DiffuseDustParameters(
-            negative_metal_tolerance_msun=args.negative_metal_tolerance_msun))
+            negative_metal_tolerance_msun=args.negative_metal_tolerance_msun,
+            negative_metal_relative_tolerance=args.negative_metal_relative_tolerance))
         result = calc.calculate_diffuse_galaxy_seds(args.catalog, args.galaxy_index, wave, model)
         report.update(provenance=result.provenance, example_diagnostics=result.diagnostics)
         if args.sample_size:

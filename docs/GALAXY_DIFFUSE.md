@@ -30,7 +30,8 @@ with Benson2018DiffuseProvider(receipt) as provider:
     model = BensonGalaxyDust(provider, DiffuseDustParameters(
         dust_to_metals_ratio=0.334,
         cloud_fraction=0.25,
-        negative_metal_tolerance_msun=0.0,
+        negative_metal_tolerance_msun=1.0,
+        negative_metal_relative_tolerance=1e-4,
     ))
     result = calculator.calculate_diffuse_galaxy_seds(
         "data/romanUNIT.hdf5", 0, np.geomspace(0.12, 2.0, 369), model,
@@ -99,6 +100,15 @@ conflicting legacy/modern conversion factors raise rather than being guessed.
 Stellar Lnu retains the existing SED-kernel
 normalization.
 
+For negative disk metals, the reader also uses optional `diskMassGas` and
+`diskMassStellar` (with explicit unit conversions) to set
+`disk_mass_reference_msun = max(Mgas, 0) + max(Mstar, 0)`.
+If either dataset is missing, only the absolute tolerance is available. It
+does not use the halo or spheroid mass, or the absolute value of a negative
+reservoir, to enlarge this reference. Direct callers may supply the same
+reference explicitly; irrelevant reference data are not required for positive
+disk metals.
+
 Known incompatible profile declarations are rejected when relevant. Where
 profile declarations are absent, the explicitly selected Benson adapter assumes
 the standard exponential/Hernquist scale-radius convention; it cannot infer
@@ -129,11 +139,21 @@ values and supplied catalog units/profile declarations are retained in diagnosti
   spheroid light or no disk dust. A line-only spheroid still needs a radius.
   An absent source returns zero light with identity transmission as a sentinel;
   its coordinates explicitly record `source_has_light=False`.
-- Negative/nonfinite light, nonfinite masses, and relevant invalid radii raise.
-  Disk metal masses are strictly nonnegative by default. An explicitly configured
-  absolute `negative_metal_tolerance_msun` permits only values within that bound
-  to be replaced by zero, recording both the original value and a flag.
-  There is no automatic tolerance scaled to the galaxy's mass.
+- Negative/nonfinite light, nonfinite metal masses, and relevant invalid radii raise.
+  Small negative disk metal residuals are allowed by default, using
+  `abs(MZ) <= max(negative_metal_tolerance_msun,
+  negative_metal_relative_tolerance * disk_mass_reference_msun)`.
+  The provisional defaults are **1 Msun** and **1e-4** respectively. These are
+  configurable post-processing choices, not demonstrated ODE or attenuation
+  error bounds. Larger negative disk metal masses raise; set both tolerances
+  to zero for strict rejection.
+  Accepted negatives emit `NumericalMetalMassWarning`, set
+  `disk_metals_sanitized`, and use zero **only for the dust calculation**.
+  Diagnostics retain the original signed mass, reference mass, effective
+  tolerance, and mass used. Neither the catalog nor Galacticus evolution is
+  modified: retaining numerical residuals during evolution avoids cumulative
+  mass creation from repeatedly zeroing them. Python warning filters can
+  control repeated messages; per-galaxy flags remain available regardless.
 - Atlas-domain policies and flags propagate unchanged. The per-component
   coordinates retain both original and clipped provider inputs; global
   diagnostics retain the physical, unclipped tau and source ratio.
@@ -143,7 +163,7 @@ The schema-v1 integer `diagnostics["status"]` is a bitwise OR of:
 | Bit value | Meaning |
 | ---: | --- |
 | 1 | Ignored positive spheroid gas-metal mass |
-| 2 | Disk metal mass sanitized within the explicit tolerance |
+| 2 | Disk metal mass treated as zero within the absolute/relative tolerance |
 | 4 | Reserved legacy spheroid-sanitation bit; no longer emitted |
 | 8 | Low-optical-depth transmission blend |
 | 16 | Optical depth clipped |
@@ -203,7 +223,7 @@ successes, 171 flagged ignored spheroid metals and three used the low-tau
 blend; none needed extrapolation or clipping. This is an unweighted sample,
 not a population completeness or accuracy estimate.
 This historical run used the former policy rejecting negative metals in either
-component; the current model only rejects negative disk metals by default.
+component; the current model accepts bounded disk residuals with a warning.
 
 On the development Mac (Python 3.12), those 256 attempts at 369 wavelengths
 plus lines took 1.84 seconds (7.2 ms/attempt), excluding template/provider
@@ -227,7 +247,7 @@ directory. SFH/template compatibility validation passed. This is one local
 catalog file, not an audit of the whole 400-file release.
 
 The same 256 evenly spaced row-index protocol, 369 wavelengths over 0.12–2 µm,
-stellar plus nebular light, and **zero disk negative-metal tolerance** gave:
+stellar plus nebular light, and the current **1 Msun / 1e-4 disk tolerances** gave:
 
 | Result | Fixes1: former validation | Fixes1: diagnostic-only spheroid metals |
 | --- | ---: | ---: |
@@ -250,11 +270,13 @@ nonfinite values. Among negative spheroid entries, the absolute mass has a
 median of 0.0898 Msun, a 99th percentile of 426 Msun, and a maximum of
 19,751 Msun; 13,972 are at most 1 Msun in magnitude. Thus the old enormous
 10^13–10^15 Msun negative values are absent in this file. The one negative disk
-entry (row 28174) lies outside the sample and would still be rejected. These
+entry (row 28174) lies outside the sample and would still be rejected: its
+magnitude is about 4.5e-4 of its 1.66e6 Msun disk gas-plus-stellar reference,
+above the provisional relative tolerance. These
 results do not establish the cause or acceptable tolerance for negative metals
 in any model that actually uses them.
 
-The recorded run took 3.26 seconds (12.7 ms/attempt) and used 190 MiB peak RSS
+The recorded run took 2.99 seconds (11.7 ms/attempt) and used 188 MiB peak RSS
 before plotting and the full-column audit. As before, initialization is excluded
 and all 256 rows succeeded. Different inputs, software and line
 sets mean these timings are not a controlled performance comparison.
